@@ -1,0 +1,15 @@
+.vscode/**
+src/**
+node_modules/**
+**/*.ts
+**/*.map
+tsconfig.json
+.gitignore
+.vscodeignore
+*.vsix
+**/.git/**
+.wrap-it-up/**
+writing/**
+widget-lookfeel/**
+*.md
+!README.md

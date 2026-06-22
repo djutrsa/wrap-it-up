@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wrap It Up — did this land?</title>
+<style>
+  /* The WHERE WAS I? re-entry card. A PASSIVE, PERSISTENT surface — NOT a
+     toast/modal: it never steals focus (main shows it inactive) and never gates re-entry (the copy
+     + .md open already happened), but it STAYS until you vote or close it (✕). There is NO
+     auto-dismiss timer — it must never vanish before you can answer. One tap, symmetric cost,
+     no confirmation. Honey aesthetic, matched to widget.html. */
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; background:transparent; overflow:hidden;
+    font-family:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    user-select:none; -webkit-user-select:none; cursor:default; color:rgba(255,250,244,.96); }
+
+  :root{
+    --pad:13px 15px; --radius:18px;
+    --body-bg:linear-gradient(180deg, rgba(158,134,104,.97) 0%, rgba(144,120,92,.96) 45%, rgba(126,100,74,.97) 100%);
+    --backdrop:blur(18px) saturate(130%);
+    --shadow:0 14px 34px -8px rgba(44,28,12,.5), 0 2px 8px -2px rgba(44,28,12,.34), inset 0 1px 0 rgba(255,244,228,.4), inset 0 0 0 1px rgba(255,244,228,.14);
+    --ease:cubic-bezier(.22,.61,.36,1);
+    --pill-bg:rgba(255,250,243,.92); --pill-fg:rgba(74,54,36,.96);
+    --pill-shadow:inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px rgba(120,92,60,.18), 0 2px 5px -2px rgba(44,28,12,.3);
+    --amber:linear-gradient(180deg, #F4AC42, #E68A22);
+  }
+
+  body{ padding:7px; }                                   /* room for the soft shadow */
+  .card{ position:relative; border-radius:var(--radius); background:var(--body-bg);
+    backdrop-filter:var(--backdrop); -webkit-backdrop-filter:var(--backdrop); box-shadow:var(--shadow);
+    padding:var(--pad); overflow:hidden; }
+  /* While the widget is being dragged the card follows it; drop the backdrop blur for that span so
+     the per-move re-blur (expensive on a transparent window) can't make the card trail/stutter. The
+     bg is ~97% opaque so it still reads as solid. Restored the moment the drag stops. */
+  .card.moving{ backdrop-filter:none !important; -webkit-backdrop-filter:none !important; }
+
+  .close{ position:absolute; top:8px; right:9px; width:20px; height:20px; border:0; padding:0; cursor:pointer;
+    background:transparent; color:rgba(255,246,236,.7); border-radius:6px; display:grid; place-items:center;
+    font-size:14px; line-height:1; transition:background .15s ease, color .15s ease; }
+  .close:hover{ background:rgba(255,244,228,.16); color:#fff; }
+
+  .restart{ display:flex; gap:6px; align-items:baseline; font-size:11px; font-weight:650; letter-spacing:.2px;
+    color:rgba(255,247,236,.78); text-transform:uppercase; }
+  .restart .arrow{ color:var(--sweep,#FFC25C); }
+  .move{ margin:3px 0 0; font-size:13px; line-height:1.35; font-weight:550; color:#fff;
+    text-shadow:0 1px 3px rgba(70,42,14,.5); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  /* Expanded: drop the 2-line clamp so the whole restart hint is readable (the card grows upward). */
+  .move.expanded{ display:block; -webkit-line-clamp:unset; overflow:visible; }
+  /* "more / less" + "copy" actions on the restart hint. "more" only shows when text is clipped;
+     "copy" is always offered so the hint itself (not just the auto-copied prompt) is grabbable. */
+  .hint-actions{ display:flex; gap:12px; align-items:baseline; margin-top:3px; }
+  .more{ display:none; padding:0; border:0; background:transparent; cursor:pointer;
+    font:inherit; font-size:10.5px; font-weight:700; color:#FFE0A8; letter-spacing:.2px; }
+  .more:hover{ text-decoration:underline; }
+  .more.show{ display:inline-block; }
+  .copyhint{ padding:0; border:0; background:transparent; cursor:pointer;
+    font:inherit; font-size:10.5px; font-weight:700; color:rgba(255,247,236,.62); letter-spacing:.2px; }
+  .copyhint:hover{ color:#FFE0A8; text-decoration:underline; }
+  .copyhint.ok{ color:#FFE0A8; text-decoration:none; cursor:default; }
+  .copied{ margin-top:6px; font-size:11px; color:rgba(255,247,236,.72); }
+  .copied b{ color:#FFE0A8; font-weight:700; }
+
+  .q{ margin:11px 0 6px; font-size:12px; font-weight:650; color:rgba(255,250,244,.95); }
+  .q em{ font-style:normal; text-decoration:underline; text-decoration-color:rgba(255,224,168,.5); text-underline-offset:2px; }
+
+  .pills{ display:flex; gap:7px; }
+  .pill{ flex:1 1 auto; border:0; cursor:pointer; padding:8px 6px; border-radius:11px; font:inherit; font-size:11.5px; font-weight:650;
+    background:var(--pill-bg); color:var(--pill-fg); box-shadow:var(--pill-shadow); white-space:nowrap;
+    transition:transform .12s var(--ease), background .15s ease, box-shadow .15s ease, opacity .15s ease; }
+  .pill:hover{ background:rgba(255,253,250,.99); transform:translateY(-1px); }
+  .pill:active{ transform:translateY(0) scale(.97); }
+  .pill.sel{ background:var(--amber); color:#fff; box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 9px -2px rgba(176,104,18,.5); }
+  .pill.dim{ opacity:.5; }
+
+  /* reason chips — only on the lowest rung, skippable; no asymmetric "tell us why" tax */
+  .chips{ display:none; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .chips.show{ display:flex; }
+  .chip{ border:0; cursor:pointer; padding:5px 9px; border-radius:9px; font:inherit; font-size:10.5px; font-weight:600;
+    background:rgba(255,244,228,.16); color:rgba(255,248,238,.92); transition:background .14s ease, transform .12s var(--ease); }
+  .chip:hover{ background:rgba(255,244,228,.28); transform:translateY(-1px); }
+  .chip:active{ transform:scale(.96); }
+  .chips .skip{ background:transparent; color:rgba(255,247,236,.55); text-decoration:underline; }
+
+  /* Clock-2 retrospective — faint, one line, references the PREVIOUS wrap */
+  .reentry{ display:none; margin-top:11px; padding-top:9px; border-top:1px solid rgba(255,244,228,.16);
+    font-size:10.5px; color:rgba(255,247,236,.62); }
+  .reentry.show{ display:block; }
+  .reentry .rq{ display:block; margin-bottom:5px; }
+  .reentry .rq b{ color:rgba(255,247,236,.82); font-weight:600; }
+  .rpills{ display:flex; gap:6px; }
+  .rpill{ border:0; cursor:pointer; padding:4px 9px; border-radius:8px; font:inherit; font-size:10px; font-weight:600;
+    background:rgba(255,244,228,.14); color:rgba(255,248,238,.85); transition:background .14s ease, transform .12s var(--ease); }
+  .rpill:hover{ background:rgba(255,244,228,.26); transform:translateY(-1px); }
+  .rpill:active{ transform:scale(.96); }
+  .reentry.done{ color:rgba(255,247,236,.5); }
+  .reentry.done .rpills{ display:none; }
+
+  .thanks{ opacity:0; transition:opacity .2s ease; }
+  .thanks.show{ opacity:1; }
+
+  @media (prefers-reduced-motion: reduce){ *{ animation-duration:.001ms !important; transition-duration:.001ms !important; } }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <button class="close" id="close" title="Dismiss" aria-label="Dismiss">✕</button>
+
+    <div class="restart"><span class="arrow">▶</span><span>Here's where to restart</span></div>
+    <p class="move" id="move">—</p>
+    <div class="hint-actions">
+      <button class="more" id="more" aria-expanded="false">show more</button>
+      <button class="copyhint" id="copyHint">copy</button>
+    </div>
+    <div class="copied" id="copied" hidden>next prompt <b>copied ✓</b></div>
+
+    <div id="ask">
+      <div class="q">did <em>this note</em> land?</div>
+      <div class="pills">
+        <button class="pill" data-v="didnt_help">didn't help</button>
+        <button class="pill" data-v="oriented">got me oriented</button>
+        <button class="pill" data-v="right_back_in">right back in</button>
+      </div>
+      <div class="chips" id="chips">
+        <button class="chip" data-c="stale">stale</button>
+        <button class="chip" data-c="wrong_files">wrong files</button>
+        <button class="chip" data-c="couldnt_tell">couldn't tell</button>
+        <button class="chip" data-c="note_fine_i_bounced">note was fine, I just bounced</button>
+        <button class="chip skip" data-c="">skip</button>
+      </div>
+    </div>
+    <div class="thanks" id="thanks">thanks — logged.</div>
+
+    <div class="reentry" id="reentry">
+      <span class="rq">last note<span id="prevTitle"></span> — did it land?</span>
+      <div class="rpills">
+        <button class="rpill" data-r="didnt_help">didn't help</button>
+        <button class="rpill" data-r="eventually">eventually</button>
+        <button class="rpill" data-r="yes">yes</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer, clipboard } = require('electron');
+    const t0 = Date.now();
+    const card = document.getElementById('card');
+    // Main toggles this while the widget is dragged so we can shed the blur for that span.
+    ipcRenderer.on('card-moving', (_e, on) => card.classList.toggle('moving', !!on));
+    const moveEl = document.getElementById('move');
+    const moreEl = document.getElementById('more');
+    const copyHintEl = document.getElementById('copyHint');
+    const copiedEl = document.getElementById('copied');
+    const askEl = document.getElementById('ask');
+    const thanksEl = document.getElementById('thanks');
+    const chipsEl = document.getElementById('chips');
+    const reentryEl = document.getElementById('reentry');
+    const prevTitleEl = document.getElementById('prevTitle');
+
+    let pending = null;        // 'didnt_help' once tapped (awaiting an optional chip)
+    let resolved = false;      // Clock-1 resolves exactly once
+    let regenStarted = false;  // a "fix-it" chip kicked off a regenerate (await the silent swap)
+    const REGEN_CHIPS = new Set(['stale', 'wrong_files', 'couldnt_tell']); // 'note_fine_i_bounced'/'skip' → no regen
+
+    // Expand/collapse the restart hint so the full text is readable (the window grows upward to fit,
+    // then shrinks back). Independent of the rating — reading the note never counts as a vote.
+    moreEl.addEventListener('click', () => {
+      const expanded = moveEl.classList.toggle('expanded');
+      moreEl.textContent = expanded ? 'show less' : 'show more';
+      moreEl.setAttribute('aria-expanded', String(expanded));
+      requestAnimationFrame(reportSize);
+    });
+
+    // Copy the FULL restart hint (not the clipped preview) to the clipboard. Independent of the
+    // auto-copied next prompt and of the rating — copying never counts as a vote.
+    copyHintEl.addEventListener('click', () => {
+      clipboard.writeText(moveEl.textContent || '');
+      copyHintEl.textContent = 'copied ✓';
+      copyHintEl.classList.add('ok');
+      clearTimeout(copyHintEl._t);
+      copyHintEl._t = setTimeout(() => {
+        copyHintEl.textContent = 'copy';
+        copyHintEl.classList.remove('ok');
+      }, 1300);
+    });
+
+    // Tell main how tall to make the window; bottom-anchored so it grows upward, staying put.
+    function reportSize(){ ipcRenderer.send('card-size', { height: Math.ceil(card.getBoundingClientRect().height + 14) }); }
+
+    ipcRenderer.on('card-data', (_e, d) => {
+      moveEl.textContent = (d && d.nextMove) || 'Pick up where you left off.';
+      // Reveal "show more" only when the hint is genuinely clipped by the 2-line clamp; otherwise
+      // it's already fully visible and a toggle would be noise. Measured after layout settles.
+      requestAnimationFrame(() => {
+        if (moveEl.scrollHeight - moveEl.clientHeight > 1) moreEl.classList.add('show');
+      });
+      if (d && d.copied) copiedEl.hidden = false;
+      if (d && d.reentry){
+        if (d.reentry.title) prevTitleEl.textContent = ' ("' + d.reentry.title.slice(0, 42) + '")';
+        reentryEl.classList.add('show');
+      }
+      requestAnimationFrame(reportSize);
+    });
+
+    function resolve(perceived_useful, reason_chip, respond_vs_dismiss){
+      if (resolved) return; resolved = true;
+      ipcRenderer.send('feedback-resolve', {
+        perceived_useful,
+        reason_chip: reason_chip || null,
+        respond_vs_dismiss,
+        perceived_delay_sec: Math.round((Date.now() - t0) / 100) / 10,
+      });
+      // brief acknowledgement, then main closes the window
+      askEl.style.display = 'none';
+      thanksEl.classList.add('show');
+      requestAnimationFrame(reportSize);
+      setTimeout(() => ipcRenderer.send('card-close'), reentryEl.classList.contains('show') && !reentryDone ? 1400 : 600);
+    }
+
+    // Clock 1 pills
+    document.querySelectorAll('.pill').forEach((b) => b.addEventListener('click', () => {
+      const v = b.dataset.v;
+      if (v === 'didnt_help'){
+        // Defer: reveal skippable chips and remember the rating, so a later ✕/timeout still
+        // resolves as a real "didn't help" (responded), never a lost no-vote.
+        pending = 'didnt_help';
+        document.querySelectorAll('.pill').forEach((p) => p.classList.remove('sel'));
+        document.querySelectorAll('.pill').forEach((p) => p.classList.toggle('dim', p !== b));
+        b.classList.add('sel'); b.classList.remove('dim');
+        chipsEl.classList.add('show');
+        requestAnimationFrame(reportSize);
+      } else {
+        b.classList.add('sel');
+        resolve(v, null, 'responded');
+      }
+    }));
+
+    // Reason chips. A "fix-it" chip (wrong files / stale / couldn't tell) does DOUBLE DUTY in one tap:
+    // it logs the rating AND auto-regenerates the wrap, steered by the chip — then the card silently
+    // swaps in the improved note. "note was fine, I bounced" / "skip" stay a plain rating + close.
+    chipsEl.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
+      if (resolved || regenStarted) return;
+      const reason = c.dataset.c || null;
+      if (reason && REGEN_CHIPS.has(reason)) {
+        regenStarted = true; resolved = true; // log the Clock-1 row now; don't let ✕/backstop double-write
+        ipcRenderer.send('feedback-resolve', {
+          perceived_useful: 'didnt_help', reason_chip: reason, respond_vs_dismiss: 'responded',
+          perceived_delay_sec: Math.round((Date.now() - t0) / 100) / 10,
+        });
+        showRegenerating();
+        ipcRenderer.send('regenerate-request', { reason });
+      } else {
+        resolve('didnt_help', reason, 'responded');
+      }
+    }));
+
+    // Mid-regenerate UI: tuck the rating away, show a brief working state, with a safety fallback so the
+    // card can never hang on "regenerating…" if the engine never replies.
+    let regenSafety = null;
+    function showRegenerating(){
+      askEl.style.display = 'none';
+      thanksEl.textContent = 'regenerating…';
+      thanksEl.classList.add('show');
+      requestAnimationFrame(reportSize);
+      clearTimeout(regenSafety);
+      regenSafety = setTimeout(() => { thanksEl.textContent = 'thanks — logged.'; ipcRenderer.send('card-close'); }, 130000);
+    }
+    // The engine re-did the wrap (main already re-copied the improved next-prompt). Silently swap the
+    // hint, confirm "updated", then close. On a no-op (cost guard) / failure, fall back to "logged".
+    ipcRenderer.on('regenerate-result', (_e, res) => {
+      clearTimeout(regenSafety);
+      if (res && res.ok) {
+        if (res.nextMove) moveEl.textContent = res.nextMove;
+        copiedEl.hidden = false;
+        thanksEl.textContent = 'updated ✓';
+      } else {
+        thanksEl.textContent = 'thanks — logged.';
+      }
+      requestAnimationFrame(reportSize);
+      setTimeout(() => ipcRenderer.send('card-close'), 1100);
+    });
+
+    // ✕ — if they'd already picked "didn't help", that's a real rating; else a true no-vote.
+    // (Mid-regenerate the Clock-1 row is already written, so just close.)
+    document.getElementById('close').addEventListener('click', () => {
+      if (regenStarted) { ipcRenderer.send('card-close'); return; }
+      if (pending === 'didnt_help') resolve('didnt_help', null, 'responded');
+      else resolve('none', null, 'dismissed_unvoted_byuser');
+    });
+
+    // Clock 2 — independent of Clock 1; one optional tap
+    let reentryDone = false;
+    reentryEl.querySelectorAll('.rpill').forEach((r) => r.addEventListener('click', () => {
+      if (reentryDone) return; reentryDone = true;
+      ipcRenderer.send('feedback-reentry', {
+        reentry_outcome: r.dataset.r,
+        reentry_delay_sec: Math.round((Date.now() - t0) / 100) / 10,
+      });
+      reentryEl.classList.add('done');
+      reentryEl.querySelector('.rq').innerHTML = 'thanks — noted on the last note.';
+      requestAnimationFrame(reportSize);
+    }));
+
+    // No auto-dismiss: the card stays until you vote or close it (✕). It never blocks your work and
+    // never steals focus, so lingering is harmless — but it must never vanish before you can answer.
+    // A deliberate ✕ with no rating is still logged (dismissed_unvoted_byuser) — an honest no-vote.
+  </script>
+</body>
+</html>

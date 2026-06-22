@@ -1,0 +1,88 @@
+{
+  "name": "wrap-it-up",
+  "displayName": "Wrap It Up",
+  "description": "One-click session wrap-up for AI-assisted coding. Passive recorder + local wrap-up. No external actions.",
+  "version": "0.0.11",
+  "publisher": "wrapitup-dev",
+  "private": true,
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/djutrsa/wrap-it-up.git"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "wrapItUp.wrap",
+        "title": "Wrap It Up: Wrap Up Now"
+      },
+      {
+        "command": "wrapItUp.resume",
+        "title": "Wrap It Up: Where Was I? (Pick Up)"
+      },
+      {
+        "command": "wrapItUp.showLast",
+        "title": "Wrap It Up: Show Last Wrap"
+      },
+      {
+        "command": "wrapItUp.copyNextPrompt",
+        "title": "Wrap It Up: Copy Next AI Prompt"
+      },
+      {
+        "command": "wrapItUp.listWraps",
+        "title": "Wrap It Up: List Recent Wraps"
+      },
+      {
+        "command": "wrapItUp.setKey",
+        "title": "Wrap It Up: Set Claude API key"
+      }
+    ],
+    "configuration": {
+      "title": "Wrap It Up",
+      "properties": {
+        "wrapItUp.redactSecrets": {
+          "type": "boolean",
+          "default": true,
+          "description": "Best-effort secret redaction before writing anything to the local log."
+        },
+        "wrapItUp.enableLLM": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use a cloud LLM (Claude) to write the summary. If off, only the local context-only wrap is produced."
+        },
+        "wrapItUp.model": {
+          "type": "string",
+          "default": "claude-sonnet-4-6",
+          "description": "Claude model used for the wrap-up (e.g. claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-8)."
+        },
+        "wrapItUp.showResumeButton": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the \"WHERE WAS I?\" status-bar button while you have a wrap you haven't picked up yet."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "selftest": "node ./out/selftest.js",
+    "start": "electron widget-lookfeel/desktop-widget/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.93.0",
+    "electron": "^42.4.1",
+    "typescript": "^5.6.0"
+  }
+}

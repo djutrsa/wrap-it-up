@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wrap It Up</title>
+<style>
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:transparent; overflow:hidden;
+    font-family:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    user-select:none; -webkit-user-select:none; cursor:default; }
+  body{ display:flex; align-items:center; justify-content:center; }
+
+  /* ===== Honey · Medium (226 × 104) — values locked in the design log ===== */
+  .wiu{
+    --w:226px; --h:104px; --radius:20px; --pad:10px 14px; --col-w:80px;
+    --disc-solo:54px; --disc-duo:48px; --icon:28px; --lab:9.5px; --labh:21px; --gd:2.7px;
+    --press:.95; --squish-d:.42s; --squish-e:cubic-bezier(.2,.8,.2,1); --ease:cubic-bezier(.22,.61,.36,1);
+    --body-bg:linear-gradient(180deg, rgba(158,134,104,.96) 0%, rgba(144,120,92,.95) 45%, rgba(126,100,74,.96) 100%);
+    --backdrop:blur(18px) saturate(130%);
+    --body-shadow:0 12px 30px -8px rgba(44,28,12,.45), 0 2px 7px -2px rgba(44,28,12,.32), inset 0 1px 0 rgba(255,244,228,.4), inset 0 0 0 1px rgba(255,244,228,.14);
+    --hover-shadow:0 18px 40px -10px rgba(44,28,12,.52), 0 4px 10px -3px rgba(44,28,12,.34), inset 0 1px 0 rgba(255,244,228,.46);
+    --fg:rgba(255,250,244,.95);
+    --grip:rgba(255,240,224,.42); --grip-hover:rgba(255,240,224,.6);
+    --sweep-color:#FFC25C;
+    position:relative; width:var(--w); height:var(--h); color:var(--fg);
+  }
+  .wiu .body{ position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; padding:var(--pad);
+    border-radius:var(--radius); background:var(--body-bg); backdrop-filter:var(--backdrop); -webkit-backdrop-filter:var(--backdrop);
+    box-shadow:var(--body-shadow); overflow:hidden; cursor:default;
+    /* NOTE: the body is intentionally NOT -webkit-app-region:drag. On Windows a drag region is
+       hit-tested as the window caption, so the renderer never gets 'contextmenu' over it (that was
+       the original "right-click dead on the body" bug). Dragging is instead handled natively by the
+       grip handle alone (see .grip below); the body stays normal client area so right-click works. */
+    transition:box-shadow .24s var(--ease), background .25s ease; }
+  .wiu .body:hover{ box-shadow:var(--hover-shadow); }
+  /* The grip (left handle) is the ONE -webkit-app-region:drag surface, so the OS moves the window
+     natively — buttery, no JS/IPC per frame, none of the trailing manual dragging had. The rest of
+     the body stays no-drag so right-click ('contextmenu') still works everywhere on it. The handle is
+     a full-height strip on the left edge (wider than the dots) to be an easy grab target; it stops
+     short of where the buttons sit so it never covers them. */
+  .wiu .grip{ position:absolute; left:0; top:0; bottom:0; width:26px; display:grid; grid-template-columns:repeat(2,auto); gap:5px 4px; place-content:center; z-index:3; cursor:grab;
+    -webkit-app-region:drag; }
+  .wiu .grip i{ width:var(--gd); height:var(--gd); border-radius:50%; background:var(--grip); transition:background .18s ease; pointer-events:none; }
+  .wiu .body:hover .grip i, .wiu .grip:hover i{ background:var(--grip-hover); }
+
+  .wiu .btn{ position:relative; flex:0 0 auto; width:var(--col-w); overflow:visible;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    border:0; cursor:pointer; background:transparent; color:inherit; font:inherit; padding:0;
+    transition:width var(--squish-d) var(--squish-e), margin var(--squish-d) var(--squish-e), opacity .26s ease; }
+  .wiu .save{ order:2; }
+  .wiu .load{ order:1; width:0; margin-right:0; opacity:0; pointer-events:none; overflow:hidden; }
+  .wiu.has-save .load{ width:var(--col-w); margin-right:10px; opacity:1; pointer-events:auto; overflow:visible; }
+  .wiu.has-save.unlocking .load{ overflow:hidden; }   /* clip only while revealing, so hover-scale isn't cut off after */
+  .wiu .disc{ position:relative; width:var(--disc-solo); height:var(--disc-solo); border-radius:50%; display:grid; place-items:center; flex:0 0 auto; color:var(--fg);
+    transition:width var(--squish-d) var(--squish-e), height var(--squish-d) var(--squish-e), background .16s var(--ease), box-shadow .18s var(--ease), transform .14s var(--ease); }
+  .wiu.has-save .save .disc{ width:var(--disc-duo); height:var(--disc-duo); }
+  .wiu .load .disc{ width:var(--disc-duo); height:var(--disc-duo); }
+  .wiu .btn:hover .disc{ transform:scale(1.05); }
+  .wiu .btn:active .disc{ transform:scale(.95); }
+  .wiu .icwrap{ position:relative; width:var(--icon); height:var(--icon); display:grid; place-items:center; }
+  .wiu .ic{ position:absolute; inset:0; display:grid; place-items:center; transition:opacity .2s ease, transform .2s ease; }
+  .wiu .ic svg{ width:var(--icon); height:var(--icon); }
+  .wiu .ic-check{ opacity:0; }
+  .wiu .label{ font-size:var(--lab); font-weight:650; letter-spacing:.3px; text-transform:uppercase; white-space:nowrap;
+    line-height:1.05; height:var(--labh); text-align:center; color:#fff; opacity:.96; text-shadow:0 1px 3px rgba(70,42,14,.55);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; }
+
+  /* primary (prominent) disc = honey-amber; secondary = cream */
+  .wiu:not(.has-save) .save .disc, .wiu.has-save .load .disc{ background:linear-gradient(180deg, #F4AC42, #E68A22); color:#fff;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5); }
+  .wiu:not(.has-save) .save:hover .disc, .wiu.has-save .load:hover .disc{ background:linear-gradient(180deg, #FBB852, #F0962C); }
+  .wiu.has-save .save .disc, .wiu:not(.has-save) .load .disc{ background:rgba(255,250,243,.92); box-shadow:inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px rgba(120,92,60,.18), 0 2px 5px -2px rgba(44,28,12,.3); color:rgba(74,54,36,.95); }
+  .wiu.has-save .save:hover .disc{ background:rgba(255,253,250,.98); }
+
+  /* reveal + sheen */
+  .wiu.unlocking .load .disc{ animation:glow .5s ease-out .08s; }
+  @keyframes glow{ 0%{ box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5), 0 0 0 0 rgba(240,150,40,0);} 45%{ box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5), 0 0 16px 2px rgba(240,150,40,.6);} 100%{ box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5), 0 0 0 0 rgba(240,150,40,0);} }
+  .wiu .body::after{ content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(105deg, transparent 38%, rgba(255,248,234,.28) 50%, transparent 62%); transform:translateX(-120%); }
+  .wiu .body:hover::after{ animation:sheen .7s var(--ease); }
+  @keyframes sheen{ from{ transform:translateX(-120%);} to{ transform:translateX(120%);} }
+
+  /* progress sweep + done */
+  .wiu .sweep{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; opacity:0; transition:opacity .2s ease; }
+  .wiu .sweep rect{ fill:none; stroke:var(--sweep-color); stroke-width:2; stroke-linecap:round; stroke-dasharray:1; stroke-dashoffset:1; }
+  .wiu.saving .sweep{ opacity:1; }
+  /* Indeterminate: a short arc travels the border on a loop for as long as the engine
+     is genuinely working (which can be tens of seconds), instead of a one-shot sweep that
+     finishes in 1.25s and then freezes fully-drawn while the real work keeps running —
+     the mismatch that made the widget look "done" seconds before the wrap actually was. */
+  .wiu.saving .sweep rect{ stroke-dasharray:0.28 0.72; animation:sweepSpin 1.1s linear infinite; }
+  @keyframes sweepSpin{ from{ stroke-dashoffset:0; } to{ stroke-dashoffset:-1; } }
+  .wiu.saving .save .ic-save{ animation:icPulse 1.2s ease-in-out infinite; }
+  @keyframes icPulse{ 0%,100%{ opacity:1; } 50%{ opacity:.5; } }
+  .wiu.done .save .ic-save{ opacity:0; }
+  .wiu.done .save .ic-check{ opacity:1; }
+  .wiu.done .save .disc{ animation:donePop .55s cubic-bezier(.34,1.4,.6,1); }
+  @keyframes donePop{ 0%{ transform:scale(.9);} 55%{ transform:scale(1.07);} 100%{ transform:scale(1);} }
+
+  /* "Where was I?" feedback: pulse while the engine fetches, pop when it returns */
+  .wiu.loading .load .disc{ animation:icPulse 1s ease-in-out infinite; }
+  .wiu.loaded  .load .disc{ animation:donePop .55s cubic-bezier(.34,1.4,.6,1); }
+
+  /* restored-from-disk state on launch should appear instantly — no entrance slide/glow */
+  .wiu.no-anim, .wiu.no-anim *{ transition:none !important; animation:none !important; }
+
+  @media (prefers-reduced-motion: reduce){ *{ animation-duration:.001ms !important; transition-duration:.001ms !important; } }
+</style>
+</head>
+<body>
+  <div class="wiu" id="w">
+    <div class="body" id="body">
+      <svg class="sweep" viewBox="0 0 226 104" preserveAspectRatio="none"><rect x="1.5" y="1.5" width="223" height="101" rx="19" ry="19" pathLength="1"/></svg>
+      <div class="grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <button class="btn save" id="saveBtn" title="Wrap it up" aria-label="Wrap it up">
+        <span class="disc"><span class="icwrap">
+          <span class="ic ic-save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8"/><path d="M16.5 8a2.5 2.5 0 0 0 0-5C13 3 12 8 12 8"/></svg></span>
+          <span class="ic ic-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        </span></span>
+        <span class="label">Wrap it up</span>
+      </button>
+      <button class="btn load" id="loadBtn" title="Where was I?" aria-label="Where was I?" disabled>
+        <span class="disc"><span class="icwrap">
+          <span class="ic ic-load"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16v-2.4C4 11.5 3 10.5 3 8c0-2.7 1.5-6 4.5-6C9.4 2 10 3.8 10 5.5c0 3.1-2 5.7-2 8.7V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.4c0-2.1 1-3.1 1-5.6 0-2.7-1.5-6-4.5-6C14.6 6 14 7.8 14 9.5c0 3.1 2 5.7 2 8.7V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/></svg></span>
+        </span></span>
+        <span class="label">Where<br>was I?</span>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    const root = document.getElementById('w');
+    const saveB = document.getElementById('saveBtn');
+    const loadB = document.getElementById('loadBtn');
+    const loadLabel = loadB.querySelector('.label');
+    const loadLabelHTML = loadLabel.innerHTML;
+
+    function setSave(on, animate){
+      const was = root.classList.contains('has-save');
+      root.classList.toggle('has-save', on);
+      loadB.disabled = !on;
+      if(on && !was && animate !== false){ root.classList.add('unlocking'); clearTimeout(root._ut); root._ut = setTimeout(()=>root.classList.remove('unlocking'), 820); }
+      if(!on) root.classList.remove('unlocking');
+    }
+    function pulse(cls){ root.classList.remove(cls); void root.offsetWidth; root.classList.add(cls); setTimeout(()=>root.classList.remove(cls), 700); }
+
+    saveB.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(root.classList.contains('saving')) return;
+      root.classList.remove('done'); root.classList.add('saving');
+      ipcRenderer.send('wrap');                       // the engine actually wraps the project
+    });
+    // The sweep runs while the engine works; 'done' fires on the real result.
+    ipcRenderer.on('wrap-result', (_e, res)=>{
+      root.classList.remove('saving');
+      clearTimeout(root._rt); clearTimeout(root._dt);
+      if(res && res.ok){
+        root.classList.add('done');
+        root._rt = setTimeout(()=> setSave(true, true), 480);   // reveal WHERE WAS I?
+        root._dt = setTimeout(()=> root.classList.remove('done'), 1200);
+      }
+      // (failure / cancelled pick: just stop the sweep — a visible error state is a later polish)
+    });
+    loadB.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(!root.classList.contains('has-save') || root.classList.contains('loading')) return;
+      root.classList.remove('loaded'); root.classList.add('loading');
+      clearTimeout(root._lt); root._lt = setTimeout(()=> root.classList.remove('loading'), 8000); // safety: clear if no reply
+      ipcRenderer.send('resume');
+    });
+    // The engine returns the latest wrap (main also opens the file); reflect it on the button.
+    ipcRenderer.on('resume-result', (_e, res)=>{
+      clearTimeout(root._lt);
+      root.classList.remove('loading');
+      if(res && res.ok){
+        root.classList.add('loaded');
+        clearTimeout(root._ldt); root._ldt = setTimeout(()=> root.classList.remove('loaded'), 900);
+        if(res.copied) loadLabel.textContent = 'Copied!';  // the paste-ready prompt is on the clipboard
+        // Re-entry consumed: you're back in, so tuck "Where was I?" away → clean single-button state.
+        // main persists this (reentryConsumed), so it stays collapsed across relaunch until the next
+        // wrap re-arms it. Linger briefly so the pop / "Copied!" is readable, then collapse and
+        // restore the label for next time.
+        clearTimeout(root._clt); clearTimeout(root._cot);
+        root._cot = setTimeout(()=>{ setSave(false, true); loadLabel.innerHTML = loadLabelHTML; }, res.copied ? 1300 : 850);
+      }
+      // (failure, e.g. 'no wraps yet': just stop the pulse — matches the wrap-result error posture)
+    });
+
+    // On launch (and after switching projects) main tells us whether the target project has a
+    // saved wrap, so "Where was I?" reflects the current project — toggled BOTH ways instantly
+    // (switching to a fresh project must grey it out, not leave a stale enabled button).
+    ipcRenderer.on('hydrate', (_e, res)=>{
+      if(!res) return;
+      const has = !!res.hasSave;
+      if(has === root.classList.contains('has-save')) return; // no change
+      root.classList.add('no-anim');             // restored/switched state: no slide-in/glow
+      setSave(has, false);
+      void root.offsetWidth;                      // commit the state without transition
+      requestAnimationFrame(()=> root.classList.remove('no-anim'));
+    });
+
+    // Custom window drag. The body is deliberately NOT a -webkit-app-region:drag area — on Windows
+    // that turns the body into the window caption, which (a) eats right-click (the renderer never
+    // sees 'contextmenu' there) and (b) on a transparent frameless window made the 'system-context-
+    // menu' fallback unreliable. So we drag the window ourselves: press the body → main records the
+    // window origin; pointer moves stream a delta from the press point; main repositions. Pointer
+    // capture keeps the move stream alive even if the cursor briefly outruns the window.
+    // Window dragging is native now: the grip is a -webkit-app-region:drag handle, so the OS moves the
+    // window (smooth, no JS/IPC per frame). No manual drag code lives here anymore.
+
+    // Click-through everywhere except the widget itself → genuinely non-invasive over real apps.
+    let interactive = false;
+    document.addEventListener('mousemove', (e)=>{
+      const r = root.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if(inside !== interactive){ interactive = inside; ipcRenderer.send('set-interactive', inside); }
+    });
+    // Esc or Ctrl+Shift+Q to quit (the latter is a global shortcut handled in main).
+    window.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') ipcRenderer.send('quit'); });
+    // Right-click the body → our menu. The body is normal client area, so 'contextmenu' fires here.
+    // (The small grip handle is a drag caption; right-clicks there are caught by main's
+    // 'system-context-menu' instead, which shows the same menu.)
+    window.addEventListener('contextmenu', (e)=>{ e.preventDefault(); ipcRenderer.send('show-menu'); });
+  </script>
+</body>
+</html>

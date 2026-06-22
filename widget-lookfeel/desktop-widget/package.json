@@ -1,0 +1,13 @@
+{
+  "name": "wrap-it-up-widget",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Honey floating desktop widget (Medium) — always-on-top prototype",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^42.4.1"
+  }
+}

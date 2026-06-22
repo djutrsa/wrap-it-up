@@ -1,0 +1,16 @@
+# Build output
+out/
+*.vsix
+
+# Dependencies
+node_modules/
+
+# Wrap It Up runtime data (a user's own wraps / feedback / logs — never published)
+.wrap-it-up/
+
+# Local-only working material
+writing/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
