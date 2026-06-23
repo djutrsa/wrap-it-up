@@ -163,14 +163,22 @@ function callClaudeCli(model: string, system: string, user: string): Promise<any
     // single command string (no args array) to avoid DEP0190; the model is the only
     // interpolated value, so sanitize it, and send the prompt over stdin (never the
     // command line) so nothing user-derived can reach the shell.
-    const safeModel = /^[\w.\-:[\]]+$/.test(model) ? model : "claude-sonnet-4-6";
+    //
+    // Only pass `--model` when one was EXPLICITLY configured (WRAPITUP_MODEL). An
+    // explicit `--model` overrides the CLI's own model resolution — so hardcoding a
+    // public-API alias like "claude-sonnet-4-6" breaks Bedrock/Vertex backends, where
+    // the CLI expects an inference-profile id (e.g. global.anthropic.claude-sonnet-4-6[1m])
+    // and returns a 400 "invalid model identifier". When unset, omit the flag entirely so
+    // the CLI uses the user's own resolved default (ANTHROPIC_DEFAULT_SONNET_MODEL, etc.).
+    const safeModel = model && /^[\w.\-:[\]]+$/.test(model) ? model : "";
+    const modelFlag = safeModel ? ` --model ${safeModel}` : "";
     // Keep this call LEAN — it is a one-shot text→JSON summarization, not an agent run.
     // `--safe-mode` skips MCP servers / hooks / CLAUDE.md / skills (the cold-start cost),
     // and `--tools ""` disables built-in tools so the model answers directly instead of
     // wandering (reading files, running commands) — which is what made it take ~90s.
     let child;
     try {
-      child = spawn(`claude -p --output-format json --safe-mode --tools "" --model ${safeModel}`, { shell: true });
+      child = spawn(`claude -p --output-format json --safe-mode --tools ""${modelFlag}`, { shell: true });
     } catch (e) {
       return reject(e);
     }
@@ -184,7 +192,17 @@ function callClaudeCli(model: string, system: string, user: string): Promise<any
     child.stderr.on("data", (d) => (err += d));
     child.on("close", (code) => {
       clearTimeout(killer);
-      if (code !== 0) return reject(new Error(`claude -p exit ${code}: ${err.slice(0, 200)}`));
+      if (code !== 0) {
+        // The `claude` CLI prints API/model errors (e.g. a Bedrock 400 "invalid model
+        // identifier") to STDOUT as a JSON result, not to stderr — so prefer stderr but
+        // fall back to stdout, otherwise the message is an unhelpful blank. Try to pull the
+        // human-readable `.result` out of the JSON; fall back to the raw tail.
+        let detail = err.trim();
+        if (!detail && out.trim()) {
+          try { detail = String(JSON.parse(out).result || out); } catch { detail = out; }
+        }
+        return reject(new Error(`claude -p exit ${code}: ${detail.slice(0, 300)}`));
+      }
       try {
         resolve(parseJsonLoose(String(JSON.parse(out).result || "")));
       } catch {
@@ -204,7 +222,12 @@ function callClaudeCli(model: string, system: string, user: string): Promise<any
 // none succeeded. With no provider at all the local wrap stands (enrichment "pending").
 async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapUp; err?: string }> {
   if (process.env.WRAPITUP_NO_LLM === "1") return { wrap: local };
-  const model = process.env.WRAPITUP_MODEL || "claude-sonnet-4-6";
+  // WRAPITUP_MODEL is OPTIONAL. The CLI path passes it through verbatim — empty means
+  // "let the `claude` CLI resolve its own default", which is what makes Bedrock/Vertex
+  // backends work (they reject the public-API alias). The direct-API path has no such
+  // resolver, so it still needs a concrete default model id.
+  const cliModel = (process.env.WRAPITUP_MODEL || "").trim();
+  const apiModel = cliModel || "claude-sonnet-4-6";
   // The mode registry picks the enricher: a domain override (e.g. writing) if ctx.mode set it,
   // else the presence-based chat-aware/chat-blind fallback. Same WrapUp schema for all of them.
   const E = selectEnrich(ctx);
@@ -214,7 +237,7 @@ async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapU
   if (process.env.WRAPITUP_NO_CLI !== "1" && hasClaudeCli()) {
     attempted = true;
     try {
-      return { wrap: E.applyEnrichmentObj(local, await callClaudeCli(model, system, user)) };
+      return { wrap: E.applyEnrichmentObj(local, await callClaudeCli(cliModel, system, user)) };
     } catch (e: any) {
       lastErr = String(e?.message || e);
     }
@@ -224,7 +247,7 @@ async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapU
   if (key) {
     attempted = true;
     try {
-      return { wrap: E.applyEnrichmentObj(local, await callClaudeTool(key, model, system, user, E.WRAP_TOOL)) };
+      return { wrap: E.applyEnrichmentObj(local, await callClaudeTool(key, apiModel, system, user, E.WRAP_TOOL)) };
     } catch (e: any) {
       lastErr = String(e?.message || e);
     }
