@@ -16,7 +16,7 @@ Wrap It Up fixes that. One click writes a short, trustworthy note of **where you
 
 Click **Wrap it up**, and you get a tidy little note with:
 
-- **▶ Here's where to restart** — your one next move, in plain language
+- **▶ Here's where to pick up** — your one next move, in plain language
 - **A paste-ready prompt** you can hand straight back to your AI to keep going
 - **What changed · what's working · what's broken** — based on what actually happened, not guesses
 - a quick status and a draft commit message

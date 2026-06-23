@@ -252,7 +252,7 @@ span: ${fmt(ctx.span.start)} -> ${fmt(ctx.span.end)}
 
 # ${w.title}
 
-## ▶ Here is where to restart
+## ▶ Here is where to pick up
 
 **Suggested next move:**
 > ${w.suggestedNextAction}
