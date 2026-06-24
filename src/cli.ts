@@ -152,33 +152,28 @@ function parseJsonLoose(s: string): any {
   return JSON.parse(t);
 }
 
-// Enrich via headless Claude Code (`claude -p`), reusing the user's existing
-// Claude Code login — no API key required. The prompt/JSON contract is the same
-// one buildEnrichInput() defines (the SYSTEM block already demands a bare JSON
-// object), so applyEnrichmentObj() merges the result unchanged.
-function callClaudeCli(model: string, system: string, user: string): Promise<any> {
+// ONE headless `claude -p` invocation. `modelArg` empty ⇒ omit --model (the CLI resolves its own
+// default). `effort` empty ⇒ don't touch CLAUDE_EFFORT (inherit the env). Resolves the parsed JSON,
+// or REJECTS with an Error whose message carries the CLI's surfaced error text — so the caller can
+// decide whether to retry with a different model. Reuses the user's Claude Code login (no API key).
+function runClaudeCli(modelArg: string, effort: string, system: string, user: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const prompt = system + "\n\n--- SESSION EVIDENCE (ground ONLY in this) ---\n\n" + user;
-    // `claude` is an npm shim (.cmd/.ps1 on Windows) → must run via a shell. Pass a
-    // single command string (no args array) to avoid DEP0190; the model is the only
-    // interpolated value, so sanitize it, and send the prompt over stdin (never the
-    // command line) so nothing user-derived can reach the shell.
-    //
-    // Only pass `--model` when one was EXPLICITLY configured (WRAPITUP_MODEL). An
-    // explicit `--model` overrides the CLI's own model resolution — so hardcoding a
-    // public-API alias like "claude-sonnet-4-6" breaks Bedrock/Vertex backends, where
-    // the CLI expects an inference-profile id (e.g. global.anthropic.claude-sonnet-4-6[1m])
-    // and returns a 400 "invalid model identifier". When unset, omit the flag entirely so
-    // the CLI uses the user's own resolved default (ANTHROPIC_DEFAULT_SONNET_MODEL, etc.).
-    const safeModel = model && /^[\w.\-:[\]]+$/.test(model) ? model : "";
+    // `claude` is an npm shim (.cmd/.ps1 on Windows) → must run via a shell. Pass a single command
+    // string (no args array) to avoid DEP0190; the model is the only interpolated value, so sanitize
+    // it, and send the prompt over stdin (never the command line) so nothing user-derived hits the shell.
+    const safeModel = modelArg && /^[\w.\-:[\]]+$/.test(modelArg) ? modelArg : "";
     const modelFlag = safeModel ? ` --model ${safeModel}` : "";
-    // Keep this call LEAN — it is a one-shot text→JSON summarization, not an agent run.
-    // `--safe-mode` skips MCP servers / hooks / CLAUDE.md / skills (the cold-start cost),
-    // and `--tools ""` disables built-in tools so the model answers directly instead of
+    // A wrap is a one-shot text→JSON summarization, not an agent run — cap reasoning effort to keep it
+    // fast. Override CLAUDE_EFFORT only when asked (so e.g. an inherited `xhigh` from a parent Claude
+    // Code session can't quietly double the wrap time); the model-default fallback inherits the env.
+    const env = effort ? { ...process.env, CLAUDE_EFFORT: effort } : process.env;
+    // Keep this call LEAN: `--safe-mode` skips MCP servers / hooks / CLAUDE.md / skills (the cold-start
+    // cost), and `--tools ""` disables built-in tools so the model answers directly instead of
     // wandering (reading files, running commands) — which is what made it take ~90s.
     let child;
     try {
-      child = spawn(`claude -p --output-format json --safe-mode --tools ""${modelFlag}`, { shell: true });
+      child = spawn(`claude -p --output-format json --safe-mode --tools ""${modelFlag}`, { shell: true, env });
     } catch (e) {
       return reject(e);
     }
@@ -193,10 +188,9 @@ function callClaudeCli(model: string, system: string, user: string): Promise<any
     child.on("close", (code) => {
       clearTimeout(killer);
       if (code !== 0) {
-        // The `claude` CLI prints API/model errors (e.g. a Bedrock 400 "invalid model
-        // identifier") to STDOUT as a JSON result, not to stderr — so prefer stderr but
-        // fall back to stdout, otherwise the message is an unhelpful blank. Try to pull the
-        // human-readable `.result` out of the JSON; fall back to the raw tail.
+        // The `claude` CLI prints API/model errors (e.g. a Bedrock 400 "invalid model identifier") to
+        // STDOUT as a JSON result, not to stderr — so prefer stderr but fall back to stdout's `.result`,
+        // otherwise the message is an unhelpful blank.
         let detail = err.trim();
         if (!detail && out.trim()) {
           try { detail = String(JSON.parse(out).result || out); } catch { detail = out; }
@@ -215,6 +209,26 @@ function callClaudeCli(model: string, system: string, user: string): Promise<any
   });
 }
 
+// The wrap's enrichment call, with a per-wrap fast-model preference + graceful fallback. A wrap is a
+// quick, bounded summarization, so PREFER a fast model at MEDIUM effort — decided here, per wrap, not
+// pinned globally. Two attempts:
+//   1) the preferred model (default "sonnet", overridable via WRAPITUP_MODEL) at medium effort;
+//   2) if that fails for ANY reason OTHER than a timeout — most importantly a Bedrock/Vertex backend
+//      REJECTING the public alias with an immediate "invalid model" 400 — retry once with NO --model so
+//      the CLI uses its own resolved default (exactly today's behavior), inheriting whatever effort the
+//      env sets ("CLI default, even if higher effort").
+// Timeouts are NOT retried, so a slow first attempt can never double the wait. The short "sonnet" alias
+// (not the full public id) is used so the CLI's own resolver maps it per-backend where it can.
+function callClaudeCli(preferredModel: string, system: string, user: string): Promise<any> {
+  const model = (preferredModel || "sonnet").trim();
+  return runClaudeCli(model, "medium", system, user).catch((e: any) => {
+    const msg = String(e?.message || e);
+    if (/timed out/i.test(msg)) throw e; // a timeout won't go faster on the default — don't pay it twice
+    process.stderr.write(`[wrap] model "${model}" @medium failed (${msg.slice(0, 120)}); retrying with the CLI default\n`);
+    return runClaudeCli("", "", system, user); // CLI-resolved default, inherited effort
+  });
+}
+
 // Enrichment provider chain (local-first is already satisfied by the caller,
 // which writes the local wrap before calling this): 1) headless Claude Code,
 // 2) ANTHROPIC_API_KEY direct API, 3) local-only. A provider that fails falls
@@ -222,10 +236,10 @@ function callClaudeCli(model: string, system: string, user: string): Promise<any
 // none succeeded. With no provider at all the local wrap stands (enrichment "pending").
 async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapUp; err?: string }> {
   if (process.env.WRAPITUP_NO_LLM === "1") return { wrap: local };
-  // WRAPITUP_MODEL is OPTIONAL. The CLI path passes it through verbatim — empty means
-  // "let the `claude` CLI resolve its own default", which is what makes Bedrock/Vertex
-  // backends work (they reject the public-API alias). The direct-API path has no such
-  // resolver, so it still needs a concrete default model id.
+  // WRAPITUP_MODEL is OPTIONAL. The CLI path treats it as the PREFERRED model — empty ⇒ callClaudeCli
+  // prefers "sonnet" at medium effort and gracefully falls back to the CLI's own resolved default if the
+  // backend rejects that alias (so Bedrock/Vertex still work). The direct-API path has no such resolver,
+  // so it still needs a concrete default model id.
   const cliModel = (process.env.WRAPITUP_MODEL || "").trim();
   const apiModel = cliModel || "claude-sonnet-4-6";
   // The mode registry picks the enricher: a domain override (e.g. writing) if ctx.mode set it,
