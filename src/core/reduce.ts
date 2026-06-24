@@ -89,12 +89,18 @@ export function reduceEvents(events: WrapEvent[]): Derived {
   const passedRuns: Derived["passedRuns"] = [];
   const failedRuns: Derived["failedRuns"] = [];
   const recoveredRuns: Derived["recoveredRuns"] = [];
+  // Latest time any command ran GREEN. A failure older than this was superseded by later
+  // successful work (and, since `runs` keeps each command's FINAL outcome, was never retried
+  // green) — so it's "activity, not intent": stale, must not anchor status/next-step. This
+  // generalizes recoveredRuns (fail→pass of the SAME cmd) to fail→unrelated-pass.
+  let lastPassT = -Infinity;
+  for (const [, r] of runs) if (r.exitCode === 0 && r.t > lastPassT) lastPassT = r.t;
   for (const [cmd, r] of runs) {
     if (r.exitCode === 0) {
       passedRuns.push({ cmd });
       if (everFailed.has(cmd)) recoveredRuns.push({ cmd }); // failed earlier, green now = fixed in-flight
     } else {
-      failedRuns.push({ cmd, exitCode: r.exitCode, outTail: r.outTail });
+      failedRuns.push({ cmd, exitCode: r.exitCode, outTail: r.outTail, stale: r.t < lastPassT });
     }
   }
 

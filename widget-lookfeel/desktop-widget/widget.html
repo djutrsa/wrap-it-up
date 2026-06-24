@@ -10,19 +10,49 @@
     user-select:none; -webkit-user-select:none; cursor:default; }
   body{ display:flex; align-items:center; justify-content:center; }
 
-  /* ===== Honey · Medium (226 × 104) — values locked in the design log ===== */
+  /* ===== Shared layout tokens (theme-independent) ===== */
   .wiu{
     --w:226px; --h:104px; --radius:20px; --pad:10px 14px; --col-w:80px;
     --disc-solo:54px; --disc-duo:48px; --icon:28px; --lab:9.5px; --labh:21px; --gd:2.7px;
     --press:.95; --squish-d:.42s; --squish-e:cubic-bezier(.2,.8,.2,1); --ease:cubic-bezier(.22,.61,.36,1);
-    --body-bg:linear-gradient(180deg, rgba(158,134,104,.96) 0%, rgba(144,120,92,.95) 45%, rgba(126,100,74,.96) 100%);
     --backdrop:blur(18px) saturate(130%);
+    position:relative; width:var(--w); height:var(--h); color:var(--fg);
+  }
+  /* ===== Honey theme (default) ===== */
+  .wiu[data-theme="honey"]{
+    --body-bg:linear-gradient(180deg, rgba(158,134,104,.96) 0%, rgba(144,120,92,.95) 45%, rgba(126,100,74,.96) 100%);
     --body-shadow:0 12px 30px -8px rgba(44,28,12,.45), 0 2px 7px -2px rgba(44,28,12,.32), inset 0 1px 0 rgba(255,244,228,.4), inset 0 0 0 1px rgba(255,244,228,.14);
     --hover-shadow:0 18px 40px -10px rgba(44,28,12,.52), 0 4px 10px -3px rgba(44,28,12,.34), inset 0 1px 0 rgba(255,244,228,.46);
     --fg:rgba(255,250,244,.95);
     --grip:rgba(255,240,224,.42); --grip-hover:rgba(255,240,224,.6);
     --sweep-color:#FFC25C;
-    position:relative; width:var(--w); height:var(--h); color:var(--fg);
+    --disc-primary:linear-gradient(180deg,#F4AC42,#E68A22);
+    --disc-primary-hover:linear-gradient(180deg,#FBB852,#F0962C);
+    --disc-primary-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5);
+    --disc-secondary:rgba(255,250,243,.92); --disc-secondary-fg:rgba(74,54,36,.95);
+    --disc-secondary-shadow:inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px rgba(120,92,60,.18), 0 2px 5px -2px rgba(44,28,12,.3);
+    --disc-secondary-hover:rgba(255,253,250,.98);
+    --glow-color:rgba(240,150,40,.6);
+    --sheen:rgba(255,248,234,.28);
+    --label-shadow:rgba(70,42,14,.55);
+  }
+  /* ===== Purple theme ===== */
+  .wiu[data-theme="purple"]{
+    --body-bg:linear-gradient(180deg, rgba(72,42,110,.96) 0%, rgba(58,32,92,.95) 45%, rgba(44,22,74,.96) 100%);
+    --body-shadow:0 12px 30px -8px rgba(14,8,28,.5), 0 2px 7px -2px rgba(14,8,28,.36), inset 0 1px 0 rgba(210,180,255,.35), inset 0 0 0 1px rgba(210,180,255,.12);
+    --hover-shadow:0 18px 40px -10px rgba(14,8,28,.58), 0 4px 10px -3px rgba(14,8,28,.38), inset 0 1px 0 rgba(210,180,255,.42);
+    --fg:rgba(245,240,255,.96);
+    --grip:rgba(200,170,255,.38); --grip-hover:rgba(200,170,255,.58);
+    --sweep-color:#A855F7;
+    --disc-primary:linear-gradient(180deg,#9B5DE5,#7C3AED);
+    --disc-primary-hover:linear-gradient(180deg,#A855F7,#8B5CF6);
+    --disc-primary-shadow:inset 0 1px 0 rgba(255,255,255,.32), 0 3px 8px -2px rgba(100,40,200,.5);
+    --disc-secondary:rgba(240,230,255,.90); --disc-secondary-fg:rgba(52,22,84,.95);
+    --disc-secondary-shadow:inset 0 1px 0 rgba(255,255,255,.6), inset 0 0 0 1px rgba(140,100,200,.18), 0 2px 5px -2px rgba(14,8,28,.3);
+    --disc-secondary-hover:rgba(248,242,255,.98);
+    --glow-color:rgba(168,85,247,.55);
+    --sheen:rgba(220,190,255,.20);
+    --label-shadow:rgba(20,8,40,.55);
   }
   .wiu .body{ position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; padding:var(--pad);
     border-radius:var(--radius); background:var(--body-bg); backdrop-filter:var(--backdrop); -webkit-backdrop-filter:var(--backdrop);
@@ -62,21 +92,21 @@
   .wiu .ic svg{ width:var(--icon); height:var(--icon); }
   .wiu .ic-check{ opacity:0; }
   .wiu .label{ font-size:var(--lab); font-weight:650; letter-spacing:.3px; text-transform:uppercase; white-space:nowrap;
-    line-height:1.05; height:var(--labh); text-align:center; color:#fff; opacity:.96; text-shadow:0 1px 3px rgba(70,42,14,.55);
+    line-height:1.05; height:var(--labh); text-align:center; color:#fff; opacity:.96; text-shadow:0 1px 3px var(--label-shadow);
     display:flex; flex-direction:column; align-items:center; justify-content:center; }
 
-  /* primary (prominent) disc = honey-amber; secondary = cream */
-  .wiu:not(.has-save) .save .disc, .wiu.has-save .load .disc{ background:linear-gradient(180deg, #F4AC42, #E68A22); color:#fff;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5); }
-  .wiu:not(.has-save) .save:hover .disc, .wiu.has-save .load:hover .disc{ background:linear-gradient(180deg, #FBB852, #F0962C); }
-  .wiu.has-save .save .disc, .wiu:not(.has-save) .load .disc{ background:rgba(255,250,243,.92); box-shadow:inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px rgba(120,92,60,.18), 0 2px 5px -2px rgba(44,28,12,.3); color:rgba(74,54,36,.95); }
-  .wiu.has-save .save:hover .disc{ background:rgba(255,253,250,.98); }
+  /* primary (prominent) disc = theme CTA color; secondary = light neutral */
+  .wiu:not(.has-save) .save .disc, .wiu.has-save .load .disc{ background:var(--disc-primary); color:#fff;
+    box-shadow:var(--disc-primary-shadow); }
+  .wiu:not(.has-save) .save:hover .disc, .wiu.has-save .load:hover .disc{ background:var(--disc-primary-hover); }
+  .wiu.has-save .save .disc, .wiu:not(.has-save) .load .disc{ background:var(--disc-secondary); box-shadow:var(--disc-secondary-shadow); color:var(--disc-secondary-fg); }
+  .wiu.has-save .save:hover .disc{ background:var(--disc-secondary-hover); }
 
   /* reveal + sheen */
   .wiu.unlocking .load .disc{ animation:glow .5s ease-out .08s; }
-  @keyframes glow{ 0%{ box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5), 0 0 0 0 rgba(240,150,40,0);} 45%{ box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5), 0 0 16px 2px rgba(240,150,40,.6);} 100%{ box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -2px rgba(176,104,18,.5), 0 0 0 0 rgba(240,150,40,0);} }
+  @keyframes glow{ 0%{ box-shadow:var(--disc-primary-shadow), 0 0 0 0 rgba(0,0,0,0);} 45%{ box-shadow:var(--disc-primary-shadow), 0 0 16px 2px var(--glow-color);} 100%{ box-shadow:var(--disc-primary-shadow), 0 0 0 0 rgba(0,0,0,0);} }
   .wiu .body::after{ content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
-    background:linear-gradient(105deg, transparent 38%, rgba(255,248,234,.28) 50%, transparent 62%); transform:translateX(-120%); }
+    background:linear-gradient(105deg, transparent 38%, var(--sheen) 50%, transparent 62%); transform:translateX(-120%); }
   .wiu .body:hover::after{ animation:sheen .7s var(--ease); }
   @keyframes sheen{ from{ transform:translateX(-120%);} to{ transform:translateX(120%);} }
 
@@ -108,7 +138,7 @@
 </style>
 </head>
 <body>
-  <div class="wiu" id="w">
+  <div class="wiu" id="w" data-theme="honey">
     <div class="body" id="body">
       <svg class="sweep" viewBox="0 0 226 104" preserveAspectRatio="none"><rect x="1.5" y="1.5" width="223" height="101" rx="19" ry="19" pathLength="1"/></svg>
       <div class="grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -192,6 +222,7 @@
     // (switching to a fresh project must grey it out, not leave a stale enabled button).
     ipcRenderer.on('hydrate', (_e, res)=>{
       if(!res) return;
+      if(res.theme) root.dataset.theme = res.theme;
       const has = !!res.hasSave;
       if(has === root.classList.contains('has-save')) return; // no change
       root.classList.add('no-anim');             // restored/switched state: no slide-in/glow
@@ -199,6 +230,7 @@
       void root.offsetWidth;                      // commit the state without transition
       requestAnimationFrame(()=> root.classList.remove('no-anim'));
     });
+    ipcRenderer.on('set-theme', (_e, theme)=>{ root.dataset.theme = theme || 'honey'; });
 
     // Custom window drag. The body is deliberately NOT a -webkit-app-region:drag area — on Windows
     // that turns the body into the window caption, which (a) eats right-click (the renderer never

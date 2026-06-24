@@ -42,7 +42,10 @@ export interface Derived {
   hotFiles: { uri: string; churn: number; lastTouched: number }[];
   fixedSignals: { uri: string; clearedErrors: number }[];
   brokenSignals: { uri: string; openErrors: number; topMessages: string[] }[];
-  failedRuns: { cmd: string; exitCode: number; outTail: string }[];
+  // `stale`: this command's final outcome was a failure, but a LATER successful run (of any
+  // command) superseded it and it was never retried green — earlier/abandoned activity, not the
+  // current blocker. Kept in the record for honesty, but it must not drive status or the next step.
+  failedRuns: { cmd: string; exitCode: number; outTail: string; stale?: boolean }[];
   passedRuns: { cmd: string }[];
   // Commands that FAILED earlier this session but PASS at the end = fixed in-flight.
   recoveredRuns: { cmd: string }[];

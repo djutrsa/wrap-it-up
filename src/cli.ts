@@ -5,10 +5,11 @@
 // Local-first (the wrap is written before any network call); AI enrichment runs
 // ONLY if ANTHROPIC_API_KEY is set, and a failure keeps the local wrap.
 //
-//   node out/cli.js wrap   --cwd <folder> [--source claude-code|git]
+//   node out/cli.js wrap   --cwd <folder> [--source auto|claude-code|kiro|git]
 //        -> writes a wrap; prints {ok,file,title,status,nextMove,source}
-//        default source is claude-code (reads the session transcript for REAL
-//        status); auto-falls-back to git-only when no session is found.
+//        default source is auto: probes every adapter (Claude Code, Kiro) and reads
+//        the most-recent session transcript for REAL status; auto-falls-back to
+//        git-only when no session is found. Name one to force a single source.
 //   node out/cli.js resume --cwd <folder> [--prev <wrapId>]
 //        -> prints the latest wrap {ok,file,wrapId,title,nextMove,nextPrompt,prev}
 //        --prev surfaces the PRIOR wrap's one-liner for the Clock-2 retrospective.
@@ -28,7 +29,8 @@ import { redact } from "./core/redact";
 import { appendFeedbackEvent, patchReentryOutcome, appendTriage, appendRegeneration, summarizeFeedback, wrapIdFromFile, readEventById } from "./core/feedback";
 import { anonymize, sendTelemetry } from "./core/telemetry";
 import { callClaudeTool } from "./llm";
-import { findTranscript, transcriptToEvents, transcriptToConversation } from "./claudeCode";
+import { resolveSource, SessionSource } from "./sources";
+import { hasKiroCli, callKiroCli } from "./kiroModel";
 
 function readGit(folder: string): SessionContext["git"] {
   try {
@@ -102,12 +104,13 @@ function buildCtx(folder: string): SessionContext {
   };
 }
 
-// Build the session context from a Claude Code transcript: parse its tool calls
-// into events, reduce to grounded facts, then reconcile created/touched against
-// git's authoritative "vs HEAD" truth (same pipeline the editor recorder feeds).
-function buildCtxFromTranscript(folder: string, file: string): SessionContext {
-  const events = transcriptToEvents(file, folder);
-  const conversation = transcriptToConversation(file); // chat-AWARE signal (reduced to a digest at enrich time)
+// Build the session context from an agent CLI transcript (Claude Code, Kiro, …): parse its
+// tool calls into events via the resolved source adapter, reduce to grounded facts, then
+// reconcile created/touched against git's authoritative "vs HEAD" truth (same pipeline the
+// editor recorder feeds).
+function buildCtxFromTranscript(folder: string, file: string, src: SessionSource): SessionContext {
+  const events = src.transcriptToEvents(file, folder);
+  const conversation = src.transcriptToConversation(file); // chat-AWARE signal (reduced to a digest at enrich time)
   const git = readGit(folder);
   const derived = reconcileGitStatus(reduceEvents(events), git);
   const changed = [...new Set([...derived.created, ...derived.touched])];
@@ -241,9 +244,11 @@ function callClaudeCli(preferredModel: string, system: string, user: string): Pr
 
 // Enrichment provider chain (local-first is already satisfied by the caller,
 // which writes the local wrap before calling this): 1) headless Claude Code,
-// 2) ANTHROPIC_API_KEY direct API, 3) local-only. A provider that fails falls
-// through to the next; "failed" is reported only when a provider was tried and
-// none succeeded. With no provider at all the local wrap stands (enrichment "pending").
+// 2) ANTHROPIC_API_KEY direct API, 3) headless Kiro CLI (the self-contained path
+// for a Kiro user with no Claude CLI and no API key — runs on their Kiro login),
+// 4) local-only. A provider that fails falls through to the next; "failed" is
+// reported only when a provider was tried and none succeeded. With no provider at
+// all the local wrap stands (enrichment "pending").
 async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapUp; err?: string; model?: string }> {
   if (process.env.WRAPITUP_NO_LLM === "1") return { wrap: local };
   // WRAPITUP_MODEL is OPTIONAL. The CLI path treats it as the PREFERRED model — empty ⇒ callClaudeCli
@@ -279,6 +284,18 @@ async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapU
     }
   }
 
+  // 3) Kiro CLI as a headless model — self-contained enrichment on the user's Kiro login when there's
+  // no Claude CLI and no API key. Plain-text JSON (no tool schema) ⇒ least reliable, so tried last.
+  if (process.env.WRAPITUP_NO_KIRO !== "1" && hasKiroCli()) {
+    attempted = true;
+    try {
+      const r = await callKiroCli(system, user, (process.env.WRAPITUP_KIRO_MODEL || "").trim() || undefined);
+      return { wrap: E.applyEnrichmentObj(local, r.obj), model: r.model };
+    } catch (e: any) {
+      lastErr = String(e?.message || e);
+    }
+  }
+
   if (attempted) return { wrap: { ...local, enrichment: "failed" }, err: lastErr };
   return { wrap: local };
 }
@@ -293,10 +310,10 @@ async function doWrap(folder: string, source: string): Promise<{ file: string; w
   let ctx: SessionContext | null = null;
   let usedSource = "git";
   if (source !== "git") {
-    const tr = findTranscript(folder);
-    if (tr) {
-      ctx = buildCtxFromTranscript(folder, tr);
-      usedSource = "claude-code";
+    const hit = resolveSource(folder, source);
+    if (hit) {
+      ctx = buildCtxFromTranscript(folder, hit.file, hit.src);
+      usedSource = hit.src.name;
     }
   }
   if (!ctx) ctx = buildCtx(folder); // git-only fallback (no session found)
@@ -370,8 +387,8 @@ async function doRegenerate(
   // "stale" wants the freshest state -> re-capture; otherwise re-enrich the original capture.
   let ctx: SessionContext | null = reason === "stale" ? null : readCtxSidecar(file);
   if (!ctx) {
-    const tr = findTranscript(folder);
-    ctx = tr ? buildCtxFromTranscript(folder, tr) : buildCtx(folder);
+    const hit = resolveSource(folder, "auto");
+    ctx = hit ? buildCtxFromTranscript(folder, hit.file, hit.src) : buildCtx(folder);
   }
   ctx.nudge = nudge;
 
@@ -445,7 +462,7 @@ async function main(): Promise<void> {
 
   if (cmd === "wrap") {
     const si = args.indexOf("--source");
-    const source = si >= 0 && args[si + 1] ? args[si + 1] : "claude-code";
+    const source = si >= 0 && args[si + 1] ? args[si + 1] : "auto";
     const { file, wrap, usedSource, model } = await doWrap(folder, source);
     const md = fs.readFileSync(file, "utf8");
     const nextMove = grab(md, /\*\*Suggested next move:\*\*\s*\n>\s*(.+)/) || wrap.suggestedNextAction;

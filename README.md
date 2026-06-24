@@ -25,11 +25,11 @@ Come back later, tap **Where was I?**, and it reopens your files and hands you t
 
 ## Where it lives
 
-Mainly as a small **floating widget** on your desktop — always on top, never in the way, and it works no matter which AI tool you're coding in. One warm little pill:
+Mainly as a small **floating widget** on your desktop — always on top, never in the way, and it works whether you code in **Claude Code** or **Kiro** (CLI *or* IDE). One warm little pill:
 
 - **Wrap it up** saves your place.
 - **Where was I?** appears once you have something to come back to. Tap it and you're back — your paste-ready prompt is copied and your note reopens. Once you've returned, it tucks itself away, so the widget rests at a single calm button until your next wrap.
-- **Drag** it anywhere by the grip on the left. **Right-click the widget — or its system-tray icon —** to switch which project it's watching, add a Claude API key, toggle start-at-login, choose whether picking a note back up reopens it in your editor, or quit.
+- **Drag** it anywhere by the grip on the left. **Right-click the widget — or its system-tray icon —** to switch which project it's watching, **pick which AI session it reads (Claude Code or Kiro)**, add a Claude API key, toggle start-at-login, choose whether picking a note back up reopens it in your editor, or quit.
 - Once installed, it **starts with your computer** and waits quietly in the **system tray** — close the little widget and it just tucks away there, ready when you need it (it only quits when you tell it to).
 - When you come back, it quietly asks whether the note actually got you back in. Your answer never leaves your machine — it just helps the notes get better over time.
 
@@ -50,7 +50,7 @@ It only tells you things it actually saw. When it isn't sure, it *says so* — a
 
 A few deliberate choices under the hood:
 
-- **It watches as you go; it doesn't reconstruct at the last second.** A lightweight recorder logs what actually happens — edits, errors that appear and clear, command results — and grounds the note in that. The **desktop widget** is the fuller experience: **with your okay, it also reads your AI session's transcript — a local file on your machine, never a running app** — so the note knows what you were *trying* to do, whichever AI tool you used. The in-editor button is lighter — it reads only editor evidence, not your AI chat. Either way, the **truth** comes from what actually happened, so it can't claim something the work doesn't back up. No signal? It says "Unknown" instead of bluffing — an honest blank beats a confident wrong turn.
+- **It watches as you go; it doesn't reconstruct at the last second.** A lightweight recorder logs what actually happens — edits, errors that appear and clear, command results — and grounds the note in that. The **desktop widget** is the fuller experience: **with your okay, it also reads your AI session's transcript — a local file on your machine, never a running app** — so the note knows what you were *trying* to do — whether you code in **Claude Code** or **Kiro** (CLI or IDE). The in-editor button is lighter — it reads only editor evidence, not your AI chat. Either way, the **truth** comes from what actually happened, so it can't claim something the work doesn't back up. No signal? It says "Unknown" instead of bluffing — an honest blank beats a confident wrong turn.
 - **The button waits; it never guesses you're back.** Wrapping up sets a quiet marker, and "Where was I?" lights up beside it — there's no fragile "are they back yet?" detection to get wrong. The marker clears only when *you* act (pick it up, wrap again, or dismiss), never on a stray keystroke — because mis-guessing "was that a real edit?" is exactly how a safety net vanishes at the worst moment. ("Where was I?" also stays hidden until there's actually something to return to.)
 - **The truth comes from artifacts, not vibes.** Status and "what works / what broke" are grounded in real captured signals — a passed or failed run, an error that appeared or cleared, a diff hunk — so the note can't claim something the work doesn't back up.
 
@@ -78,7 +78,7 @@ npm run dist:win    # on Windows → dist/ : an installer .exe and a portable .e
 npm run dist:mac    # on macOS   → dist/ : a .dmg
 ```
 
-Install it and it stays out of your way: it comes up quietly in the tray when you log in, and a single running copy is enough no matter how many times you launch it. No `claude` CLI? Right-click the tray → **Set Claude API key…** and the AI wraps work from your key alone (stored encrypted on your machine; the plain, no-AI wrap always works too).
+Install it and it stays out of your way: it comes up quietly in the tray when you log in, and a single running copy is enough no matter how many times you launch it. No `claude` CLI? Right-click the tray → **Set Claude API key…** and the AI wraps work from your key alone (stored encrypted on your machine; the plain, no-AI wrap always works too). **Already using Kiro? You don't even need a key — the AI wraps run through your existing Kiro login.**
 
 These builds aren't code-signed yet, so your OS warns you once on first run:
 

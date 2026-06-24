@@ -36,7 +36,10 @@ export function buildEnrichInput(ctx: SessionContext, local: WrapUp): { system: 
   if (d.brokenSignals.length) L.push(`- Errors STILL OPEN: ${d.brokenSignals.map((b) => `${base(b.uri)}: ${b.openErrors} — ${(b.topMessages[0] || "").slice(0, 160)}`).join(" | ")}`);
   if (d.passedRuns.length) L.push(`- Commands PASSED: ${d.passedRuns.map((r) => r.cmd).join(", ")}`);
   if (d.recoveredRuns.length) L.push(`- Commands RECOVERED (were failing earlier, now pass — fixed this session): ${d.recoveredRuns.map((r) => r.cmd).join(", ")}`);
-  if (d.failedRuns.length) L.push(`- Commands FAILED: ${d.failedRuns.map((r) => `${r.cmd} (exit ${r.exitCode}) tail="${clip(r.outTail, 220, 0)}"`).join(" | ")}`);
+  const curFailed = d.failedRuns.filter((r) => !r.stale);
+  const staleFailed = d.failedRuns.filter((r) => r.stale);
+  if (curFailed.length) L.push(`- Commands FAILED: ${curFailed.map((r) => `${r.cmd} (exit ${r.exitCode}) tail="${clip(r.outTail, 220, 0)}"`).join(" | ")}`);
+  if (staleFailed.length) L.push(`- Commands that failed EARLIER but were SUPERSEDED by later successful work (NOT the current state — do NOT anchor status or the next step on these): ${staleFailed.map((r) => r.cmd).join(", ")}`);
   if (d.created.length) L.push(`- Files created: ${d.created.map(base).join(", ")}`);
   if (d.touched.length) L.push(`- Files changed on disk: ${d.touched.map(base).join(", ")}`);
   if (d.deleted.length) L.push(`- Files deleted: ${d.deleted.map(base).join(", ")}`);
@@ -103,6 +106,13 @@ export const WRAP_TOOL = {
 // Merge the model's structured object onto the local wrap.
 export function applyEnrichmentObj(local: WrapUp, p: any): WrapUp {
   const status: Status = p && STATUSES.indexOf(p.status) >= 0 ? p.status : local.status;
+  // The resume prompt is REQUIRED in the tool schema, and rule 2/8 tell the model to return an
+  // EMPTY string when nothing is genuinely in progress (e.g. it refused to anchor on a crash/stale
+  // failure). So an empty string is a deliberate "no prompt" — honor it (→ null, a clean stop).
+  // Only fall back to the local draft when the model OMITTED the field entirely (not when it chose
+  // empty). The old `np ? np : local` conflated the two and resurrected the local crash-anchored
+  // prompt the model had just (correctly) rejected.
+  const hasPrompt = !!p && typeof p.suggestedNextAIPrompt === "string";
   const np = str(p?.suggestedNextAIPrompt);
   return {
     ...local,
@@ -113,7 +123,7 @@ export function applyEnrichmentObj(local: WrapUp, p: any): WrapUp {
     whatWorks: arr(p?.whatWorks, local.whatWorks),
     whatBroke: arr(p?.whatBroke, local.whatBroke),
     suggestedNextAction: str(p?.suggestedNextAction) || local.suggestedNextAction,
-    suggestedNextPrompt: np ? np : local.suggestedNextPrompt,
+    suggestedNextPrompt: hasPrompt ? (np || null) : local.suggestedNextPrompt,
     suggestedCommitMessage: str(p?.suggestedCommitMessage) || local.suggestedCommitMessage,
     enrichment: "complete",
   };

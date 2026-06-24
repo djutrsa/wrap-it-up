@@ -39,7 +39,10 @@ export function buildLocalWrap(ctx: SessionContext): WrapUp {
 
   const whatBroke: string[] = [];
   for (const b of d.brokenSignals) whatBroke.push(`${base(b.uri)} — ${b.openErrors} open error(s)${b.topMessages?.[0] ? `: ${redact(b.topMessages[0]).slice(0, 160)}` : ""}`);
-  for (const r of d.failedRuns.slice(0, 5)) whatBroke.push(`\`${r.cmd}\` failed (exit ${r.exitCode})${r.outTail ? `: ${redact(lastLine(r.outTail)).slice(0, 160)}` : ""}`);
+  // Skip STALE failures: a command that failed earlier but was superseded by later successful work
+  // is not the current broken state — listing it here would contradict the status badge. It stays in
+  // capturedContext.runOutput below for the full, honest run record.
+  for (const r of d.failedRuns.filter((r) => !r.stale).slice(0, 5)) whatBroke.push(`\`${r.cmd}\` failed (exit ${r.exitCode})${r.outTail ? `: ${redact(lastLine(r.outTail)).slice(0, 160)}` : ""}`);
 
   const { nextAction, nextPrompt } = nextSteps(ctx, d, top);
 
@@ -168,10 +171,10 @@ function applyWritingLocal(ctx: SessionContext, w: WrapUp): WrapUp {
 }
 
 function pickStatus(d: Derived): Status {
-  // Don't let an incidental agent/tool-CLI crash (claude/gemini/…) color the verdict —
-  // same "activity, not intent" guard as nextSteps(). The crash is still recorded under
-  // "what broke" as honest evidence; it just doesn't flip the status badge to Broken.
-  const realFailedRuns = d.failedRuns.filter((r) => !isAgentCmd(r.cmd));
+  // Don't let an incidental agent/tool-CLI crash (claude/gemini/…) or a STALE failure (one
+  // superseded by later successful work) color the verdict — same "activity, not intent" guard
+  // as nextSteps(). They stay in the full run record; they just don't flip the badge to Broken.
+  const realFailedRuns = d.failedRuns.filter((r) => !isAgentCmd(r.cmd) && !r.stale);
   const broke = d.brokenSignals.length > 0 || realFailedRuns.length > 0;
   const good = d.passedRuns.length > 0 || d.fixedSignals.length > 0;
   if (broke && good) return "Partially working";
@@ -206,7 +209,8 @@ function makeSummary(ctx: SessionContext, d: Derived, top: string[]): string {
 }
 
 function nextSteps(ctx: SessionContext, d: Derived, top: string[]): { nextAction: string; nextPrompt: string | null } {
-  const realFailures = d.failedRuns.filter((r) => !isAgentCmd(r.cmd));
+  // Exclude agent-CLI crashes AND stale (superseded) failures — never anchor the resume on either.
+  const realFailures = d.failedRuns.filter((r) => !isAgentCmd(r.cmd) && !r.stale);
   if (realFailures.length) {
     const r = realFailures[0];
     const line = redact(lastLine(r.outTail));

@@ -79,7 +79,8 @@ function createWindow() {
     const folder = targetFolder();
     // Show "Where was I?" on launch only if there's a wrap AND it hasn't already been resumed
     // (reentryConsumed). A consumed re-entry stays collapsed across relaunch until the next wrap.
-    if (folder && hasExistingWrap(folder) && !readCfg().reentryConsumed) win.webContents.send('hydrate', { hasSave: true });
+    if (folder && hasExistingWrap(folder) && !readCfg().reentryConsumed) win.webContents.send('hydrate', { hasSave: true, theme: readCfg().colorTheme || 'honey' });
+    win.webContents.send('set-theme', readCfg().colorTheme || 'honey');
   });
 
   // Right-click on the body flows through the renderer ('contextmenu' → 'show-menu'). The grip is the
@@ -223,7 +224,7 @@ function buildMenuTemplate() {
   const visible = !!(win && !win.isDestroyed() && win.isVisible());
   const hasKey = !!(cfg.apiKeyEnc || cfg.apiKeyPlain);
   const ai = aiStatus();
-  const aiLabel = ai === 'cli' ? 'AI: Claude CLI' : ai === 'key' ? 'AI: API key' : 'AI: off (local only)';
+  const aiLabel = ai === 'cli' ? 'AI: Claude CLI' : ai === 'key' ? 'AI: API key' : ai === 'kiro' ? 'AI: Kiro' : 'AI: off (local only)';
   const items = [
     { label: folder ? `Wrapping: ${path.basename(folder)}` : 'No project — pick one…', enabled: !folder, click: folder ? undefined : () => changeFolder() },
     { type: 'separator' },
@@ -239,6 +240,18 @@ function buildMenuTemplate() {
     { label: 'Start at login', type: 'checkbox', checked: cfg.openAtLogin === true, click: (it) => setOpenAtLogin(it.checked) },
     { label: 'Open wrap-up in editor', type: 'checkbox', checked: cfg.openWrapInEditor !== false, click: (it) => setOpenWrapInEditor(it.checked) },
     { label: 'Share anonymous usage data', type: 'checkbox', checked: cfg.telemetryConsent === true, click: (it) => setTelemetryConsent(it.checked) },
+    { label: 'Color Theme', submenu: [
+      { label: 'Honey (default)', type: 'radio', checked: (cfg.colorTheme || 'honey') === 'honey', click: () => setColorTheme('honey') },
+      { label: 'Purple',         type: 'radio', checked: cfg.colorTheme === 'purple',              click: () => setColorTheme('purple') },
+      { label: 'Space Blue',     type: 'radio', checked: cfg.colorTheme === 'space-blue',          click: () => setColorTheme('space-blue') },
+    ]},
+    // Which AI session to read. 'Auto' uses the most-recent session across tools — convenient, but it
+    // can grab the wrong one when two agents share a folder. Pin Claude Code or Kiro to be unambiguous.
+    { label: 'Session source', submenu: [
+      { label: 'Auto (newest)', type: 'radio', checked: (cfg.wrapSource || 'auto') === 'auto',  click: () => setWrapSource('auto') },
+      { label: 'Claude Code',   type: 'radio', checked: cfg.wrapSource === 'claude-code',        click: () => setWrapSource('claude-code') },
+      { label: 'Kiro',          type: 'radio', checked: cfg.wrapSource === 'kiro',               click: () => setWrapSource('kiro') },
+    ]},
     { type: 'separator' },
     { label: 'Quit Wrap It Up', click: () => quitApp() }
   );
@@ -304,6 +317,16 @@ function setOpenAtLogin(on) {
 // intrusive can switch it off and just take the paste-ready prompt + the feedback card; the note is
 // still written to disk either way. Persisted so the checkbox sticks across relaunch.
 function setOpenWrapInEditor(on) { writeCfg({ openWrapInEditor: !!on }); refreshTray(); }
+// Persisted choice of which AI session the engine reads (auto | claude-code | kiro). Passed to
+// `cli.js wrap --source` on the next press. Default 'auto' preserves newest-session-wins.
+function setWrapSource(src) { writeCfg({ wrapSource: src }); refreshTray(); }
+function setColorTheme(theme) {
+  writeCfg({ colorTheme: theme });
+  if (win && !win.isDestroyed())   win.webContents.send('set-theme', theme);
+  if (card && !card.isDestroyed()) card.webContents.send('set-theme', theme);
+  if (keyWin && !keyWin.isDestroyed()) keyWin.webContents.send('set-theme', theme);
+  refreshTray();
+}
 // Once per install: default auto-start ON (packaged only), plus a one-time, NON-BLOCKING nudge to add
 // an API key when neither the CLI nor a key is present. Skipped entirely under --smoke (hermetic runs).
 function firstRunInit() {
@@ -372,7 +395,28 @@ function hasClaudeCliInPath() {
   }
   return false;
 }
-function aiStatus() { return hasClaudeCliInPath() ? 'cli' : (loadKey() ? 'key' : 'off'); }
+// kiro-cli can run the enrichment headlessly on the user's Kiro login (no API key) — so a Kiro user
+// is NOT "AI: off". Detect it on PATH or at its known install location (its installer doesn't add PATH).
+function hasKiroCliInPath() {
+  if (process.env.WRAPITUP_KIRO_BIN) return true;
+  const exe = process.platform === 'win32' ? 'kiro-cli.exe' : 'kiro-cli';
+  for (const d of (process.env.PATH || '').split(path.delimiter)) {
+    if (!d) continue;
+    try { if (fs.existsSync(path.join(d, exe))) return true; } catch { /* ignore */ }
+  }
+  try {
+    if (process.platform === 'win32') {
+      const la = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+      if (la && fs.existsSync(path.join(la, 'Kiro-Cli', 'kiro-cli.exe'))) return true;
+    } else {
+      const home = process.env.HOME || '';
+      if (home && (fs.existsSync(path.join(home, '.local', 'bin', 'kiro-cli')) || fs.existsSync('/usr/local/bin/kiro-cli'))) return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+// Provider priority MIRRORS the engine's enrichment chain: Claude CLI > API key > Kiro CLI > off.
+function aiStatus() { return hasClaudeCliInPath() ? 'cli' : (loadKey() ? 'key' : (hasKiroCliInPath() ? 'kiro' : 'off')); }
 
 // The env for every engine spawn. Injects the stored key as ANTHROPIC_API_KEY ONLY when one isn't
 // already in the environment — so the `claude` CLI stays the preferred provider (cli.ts tries CLI
@@ -402,7 +446,7 @@ function openKeyPrompt() {
   keyWin.setAlwaysOnTop(true, 'screen-saver');
   keyWin.on('closed', () => { keyWin = null; });
   keyWin.webContents.on('did-finish-load', () => {
-    if (keyWin) { keyWin.webContents.send('key-data', { present: !!loadKey(), status: aiStatus() }); keyWin.show(); keyWin.focus(); }
+    if (keyWin) { keyWin.webContents.send('key-data', { present: !!loadKey(), status: aiStatus() }); keyWin.webContents.send('set-theme', readCfg().colorTheme || 'honey'); keyWin.show(); keyWin.focus(); }
   });
   keyWin.loadFile(path.join(__dirname, 'prompt.html'));
 }
@@ -521,7 +565,9 @@ ipcMain.on('wrap', async () => {
     setTarget(folder);
   }
   // Read the session for a rich wrap once consented; otherwise fall back to git-only.
-  let source = 'claude-code';
+  // Source = the user's menu pick (default 'auto' = newest across Claude Code + Kiro). Pinning
+  // Claude Code / Kiro avoids 'auto' grabbing the wrong session when two agents share a folder.
+  let source = readCfg().wrapSource || 'auto';
   if (!hasConsent()) {
     if (await askConsent()) writeCfg({ sessionConsent: true });
     else source = 'git';
@@ -626,7 +672,7 @@ function openCard(payload, ctx) {
   card.setAlwaysOnTop(true, 'screen-saver');
   card.on('closed', () => { card = null; });
   card.webContents.on('did-finish-load', () => {
-    if (card) { card.webContents.send('card-data', payload); card.showInactive(); } // show WITHOUT activating
+    if (card) { card.webContents.send('card-data', payload); card.webContents.send('set-theme', readCfg().colorTheme || 'honey'); card.showInactive(); } // show WITHOUT activating
   });
   card.loadFile(path.join(__dirname, 'card.html'));
 }

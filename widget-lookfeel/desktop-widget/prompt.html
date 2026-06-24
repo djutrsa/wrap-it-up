@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="honey">
 <head>
 <meta charset="utf-8" />
 <title>Claude API key</title>
@@ -35,6 +35,22 @@
   .clear{ font-size:11px; color:rgba(255,235,210,.9); text-decoration:underline; cursor:pointer; background:none; padding:0; display:none; }
   .clear.show{ display:inline; }
   @media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+  /* Purple theme overrides */
+  html[data-theme="purple"] .card{
+    background:linear-gradient(180deg, rgba(72,42,110,.98) 0%, rgba(58,32,92,.98) 45%, rgba(44,22,74,.98) 100%);
+    box-shadow:0 16px 38px -10px rgba(14,8,28,.6), inset 0 1px 0 rgba(210,180,255,.32), inset 0 0 0 1px rgba(210,180,255,.12);
+    color:rgba(245,240,255,.96);
+  }
+  html[data-theme="purple"] input{
+    background:rgba(240,230,255,.94); color:rgba(52,22,84,.95);
+    box-shadow:inset 0 0 0 1px rgba(140,100,200,.24), inset 0 1px 2px rgba(14,8,28,.14);
+  }
+  html[data-theme="purple"] input::placeholder{ color:rgba(120,80,180,.6); }
+  html[data-theme="purple"] .save{ background:linear-gradient(180deg,#9B5DE5,#7C3AED); box-shadow:inset 0 1px 0 rgba(255,255,255,.32), 0 3px 8px -2px rgba(100,40,200,.5); }
+  html[data-theme="purple"] .save:hover{ background:linear-gradient(180deg,#A855F7,#8B5CF6); }
+  html[data-theme="purple"] .ghost{ background:rgba(200,170,255,.16); }
+  html[data-theme="purple"] .ghost:hover{ background:rgba(200,170,255,.26); }
+  html[data-theme="purple"] .clear{ color:rgba(210,180,255,.9); }
 </style>
 </head>
 <body>
@@ -56,6 +72,8 @@
     const input = document.getElementById('key');
     const statusEl = document.getElementById('status');
     const clearBtn = document.getElementById('clear');
+
+    ipcRenderer.on('set-theme', (_e, theme) => { document.documentElement.dataset.theme = theme || 'honey'; });
 
     function save(){ const v = input.value.trim(); if(v) ipcRenderer.send('apikey-save', v); else ipcRenderer.send('apikey-cancel'); }
 
