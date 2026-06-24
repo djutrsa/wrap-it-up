@@ -4,6 +4,21 @@
 
 import { WrapEvent, Derived } from "./types";
 
+// A run that was KILLED / INTERRUPTED / DENIED instead of run-to-completion: a harness/OS timeout
+// (SIGTERM 143 / SIGKILL 137 / SIGINT 130), a user interrupt, or a permission/classifier denial.
+// Like an agent-CLI crash (see wrap.ts AGENT_CLI), this is "activity, not intent" — it is NOT a
+// failed run, so it must never be scored as one (which would make the next step "re-run the thing &
+// fix it", the exact misdirection this tool exists to avoid). Detection is deliberately TIGHT — the
+// signal-kill exit codes plus a few specific harness/agent phrases — so a genuine failure that merely
+// mentions a timeout (a program's own "request timed out") or an EACCES "permission denied" is NOT
+// swallowed.
+const SIGNAL_KILL_EXIT = new Set([130, 137, 143]); // 128 + SIGINT(2) / SIGKILL(9) / SIGTERM(15)
+const NON_EXEC_TEXT = /(command timed out|request interrupted by user|interrupted by the user|tool use was rejected|user doesn'?t want to proceed|permission for this action was denied|the user aborted)/i;
+export function isNonExecutionRun(exitCode?: number, outTail?: string): boolean {
+  if (typeof exitCode === "number" && SIGNAL_KILL_EXIT.has(exitCode)) return true;
+  return NON_EXEC_TEXT.test(outTail || "");
+}
+
 export function reduceEvents(events: WrapEvent[]): Derived {
   const churn = new Map<string, { churn: number; last: number }>();
   const diag = new Map<string, { errs: number; cleared: number; top: string[] }>();
@@ -47,14 +62,15 @@ export function reduceEvents(events: WrapEvent[]): Derived {
         break;
       }
       case "shell.exec":
-        if (typeof e.exitCode === "number") {
+        // Skip non-execution outcomes (timeouts / interrupts / denials) — they carry no pass/fail verdict.
+        if (typeof e.exitCode === "number" && !isNonExecutionRun(e.exitCode, e.outTail)) {
           if (e.exitCode !== 0) everFailed.add(e.cmd);
           const prev = runs.get(e.cmd);
           if (!prev || e.t >= prev.t) runs.set(e.cmd, { exitCode: e.exitCode, outTail: e.outTail || "", t: e.t });
         }
         break;
       case "task.end":
-        if (typeof e.exitCode === "number") {
+        if (typeof e.exitCode === "number" && !isNonExecutionRun(e.exitCode)) {
           if (e.exitCode !== 0) everFailed.add(e.name);
           const prev = runs.get(e.name);
           if (!prev || e.t >= prev.t) runs.set(e.name, { exitCode: e.exitCode, outTail: "", t: e.t });

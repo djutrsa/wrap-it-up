@@ -17,6 +17,7 @@ const polluted = {
   recorder_version: "northstar", model_version: "opus", session_context: { fried_flag: true, time_away_min: 30, session_type: "deep", session_len_min: 90 },
   // --- forbidden: these are what an accidental spread would leak ---
   wrap_text: "SECRET WRAP BODY", next_prompt: "paste-ready next prompt with code", code: "const KEY='sk-live-xxx'",
+  apiKey: "sk-ant-LEAKED-KEY", anthropicKey: "sk-ant-LEAKED-KEY", apiKeyEnc: "QkFTRTY0LUVOQ1JZUFRFRA==",
   changedFileContents: [{ uri: "a.ts", text: "secret source" }], conversation: [{ role: "user", text: "private chat" }],
   _telemetry: { url: "https://x.supabase.co", anonKey: "should-not-echo" },
 };
@@ -26,7 +27,7 @@ const keys = Object.keys(row).sort();
 ck("payload keys == the allowlist exactly (no extras)", JSON.stringify(keys) === JSON.stringify([...TELEMETRY_FIELDS].sort()));
 
 const blob = JSON.stringify(row);
-const forbidden = ["SECRET WRAP BODY", "paste-ready next prompt", "sk-live-xxx", "secret source", "private chat", "should-not-echo"];
+const forbidden = ["SECRET WRAP BODY", "paste-ready next prompt", "sk-live-xxx", "secret source", "private chat", "should-not-echo", "sk-ant-LEAKED-KEY", "QkFTRTY0LUVOQ1JZUFRFRA=="];
 ck("no wrap text / code / next-prompt / chat / key leaked", forbidden.every((s) => !blob.includes(s)));
 ck("metadata carried through (rating, chip, reentry, client_id)", row.perceived_useful === "didnt_help" && row.reason_chip === "wrong_files" && row.reentry_outcome === "yes" && row.client_id === "client-123");
 ck("session flags carried (not the raw context object)", row.fried_flag === true && row.session_len_min === 90 && !("session_context" in row));

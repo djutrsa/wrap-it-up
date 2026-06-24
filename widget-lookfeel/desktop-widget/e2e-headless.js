@@ -13,7 +13,9 @@ const path = require("path");
 const os = require("os");
 
 const REPO = path.join(__dirname, "..", "..");
-const ENGINE = path.join(REPO, "out", "cli.js");
+// Default to the source build; WRAPITUP_ENGINE points the SAME checks at the PACKAGED engine
+// (…/resources/app.asar.unpacked/out/cli.js) to prove the shipped engine passes too.
+const ENGINE = process.env.WRAPITUP_ENGINE ? path.resolve(process.env.WRAPITUP_ENGINE) : path.join(REPO, "out", "cli.js");
 
 // ---- the widget's exact spawn helpers (copied from main.js) ----
 function runEngine(cmd, folder, source, extraArgs) {
@@ -80,6 +82,23 @@ const sh = (cmd, cwd) => execSync(cmd, { cwd, stdio: "ignore" });
 
   const after = fs.readFileSync(wrapFile, "utf8");
   console.log("  note text: " + (after !== before ? "CHANGED by regenerate (live enrich provider)" : "unchanged (no LLM provider — plumbing-only run)"));
+
+  // 7) BYO-key injection contract: a key in the engine's ENV (exactly what the widget's spawnEnv injects
+  // when a stored key exists and the CLI is absent) must drive the API path. With a dummy key + the CLI
+  // disabled, the local wrap is still written and enrichment is attempted then fails gracefully — proving
+  // the key path is reached, WITHOUT spending real tokens or touching the user's `claude` CLI.
+  const keyEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1", ANTHROPIC_API_KEY: "sk-ant-dummy-INVALID", WRAPITUP_NO_CLI: "1" };
+  delete keyEnv.WRAPITUP_NO_LLM;
+  const keyRes = await new Promise((resolve) => {
+    let out = "";
+    const p = spawn(process.execPath, [ENGINE, "wrap", "--cwd", tmp, "--source", "git"], { cwd: tmp, env: keyEnv });
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", () => { try { resolve(JSON.parse(out.trim().split("\n").filter(Boolean).pop())); } catch { resolve({ ok: false }); } });
+    p.on("error", () => resolve({ ok: false }));
+  });
+  ck("BYO key: wrap still written with a key in env", !!(keyRes && keyRes.ok && keyRes.file));
+  ck("BYO key: API enrichment attempted then failed gracefully (dummy key)",
+    !!(keyRes && keyRes.file && /AI enrichment failed/.test(fs.readFileSync(keyRes.file, "utf8"))));
 
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(fail ? `\nE2E HARNESS: ${fail} check(s) FAILED` : "\nE2E HARNESS: all checks passed");

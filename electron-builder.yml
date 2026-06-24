@@ -1,0 +1,70 @@
+# electron-builder config for the Wrap It Up desktop widget.
+# The repo root is a DUAL-identity package (VS Code extension manifest AND this Electron
+# app), so `extraMetadata.main` rewrites `main` ONLY in the packaged app's package.json —
+# the source `package.json` keeps `main: ./out/extension.js` so the VS Code half still works.
+appId: com.wrapitup.widget
+productName: Wrap It Up
+copyright: Copyright © 2026 Wrap It Up
+
+directories:
+  output: dist
+  buildResources: build      # build/icon.png (≥512²) is auto-detected → per-platform icons
+
+extraMetadata:
+  main: widget-lookfeel/desktop-widget/main.js
+
+# Allow-list first: ONLY ship the widget shell + the compiled engine + the manifest.
+# Everything else (src, private corpora, docs, dev harnesses) is excluded by omission;
+# the explicit `!` denials are defense-in-depth for a PUBLIC repo.
+files:
+  - widget-lookfeel/desktop-widget/main.js
+  - widget-lookfeel/desktop-widget/widget.html
+  - widget-lookfeel/desktop-widget/card.html
+  - widget-lookfeel/desktop-widget/prompt.html
+  - widget-lookfeel/desktop-widget/assets/**
+  - out/**/*.js
+  - package.json
+  - "!**/*.map"
+  - "!**/*.ts"
+  - "!src/**"
+  - "!backtest/**"
+  - "!northstar/**"
+  - "!oracle/**"
+  - "!writing/**"
+  - "!supabase/**"
+  - "!brag-output/**"
+  - "!.wrap-it-up/**"
+  - "!**/*.vsix"
+  - "!publish.sh"
+  - "!.vscode/**"
+  - "!widget-lookfeel/desktop-widget/e2e-headless.js"
+  - "!widget-lookfeel/desktop-widget/telemetry-privacy.check.js"
+  - "!widget-lookfeel/desktop-widget/lifecycle-smoke.js"
+  - "!widget-lookfeel/desktop-widget/package-lock.json"
+
+# CRITICAL: the engine is spawned as a real child process (process.execPath +
+# ELECTRON_RUN_AS_NODE). A .js inside app.asar can't be spawned, so keep out/ on disk.
+asarUnpack:
+  - out/**
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false                      # per-user install → no UAC elevation
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Wrap It Up
+
+mac:
+  target:
+    - target: dmg
+    - target: zip
+  category: public.app-category.developer-tools
+  identity: null                         # unsigned for now (decision #10)

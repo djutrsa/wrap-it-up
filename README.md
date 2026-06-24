@@ -29,7 +29,8 @@ Mainly as a small **floating widget** on your desktop — always on top, never i
 
 - **Wrap it up** saves your place.
 - **Where was I?** appears once you have something to come back to. Tap it and you're back — your paste-ready prompt is copied and your note reopens. Once you've returned, it tucks itself away, so the widget rests at a single calm button until your next wrap.
-- **Drag** it anywhere by the grip on the left; **right-click** to switch which project it's watching, or to quit.
+- **Drag** it anywhere by the grip on the left. **Right-click the widget — or its system-tray icon —** to switch which project it's watching, add a Claude API key, toggle start-at-login, choose whether picking a note back up reopens it in your editor, or quit.
+- Once installed, it **starts with your computer** and waits quietly in the **system tray** — close the little widget and it just tucks away there, ready when you need it (it only quits when you tell it to).
 - When you come back, it quietly asks whether the note actually got you back in. Your answer never leaves your machine — it just helps the notes get better over time.
 
 Prefer to stay inside your IDE? There's also a lighter **button for VS Code / Cursor** — convenient if you never leave the editor, though it only sees what happens there. The widget does more (see below).
@@ -55,24 +56,34 @@ A few deliberate choices under the hood:
 
 ## Try it (from source)
 
-Build the engine once:
-
 ```bash
 npm install
-npm run compile
+npm run dev
 ```
 
-Then launch the **desktop widget** (the main surface):
-
-```bash
-cd widget-lookfeel/desktop-widget
-npm install
-npm start
-```
-
-Right-click the widget to choose which project it watches (it also asks the first time you wrap). Your notes land in a local `.wrap-it-up/` folder.
+`npm run dev` builds the engine, watches it for changes, and launches the **desktop widget** (the main surface). Right-click the widget — or its tray icon — to choose which project it watches (it also asks the first time you wrap). Your notes land in a local `.wrap-it-up/` folder.
 
 Prefer the in-editor button? Open the folder in VS Code / Cursor and press **F5**, then click **Wrap it up**.
+
+## Install it as a real app
+
+Run it like any other desktop app — **auto-starting on login, living in your system tray, no terminal needed.**
+
+**Windows — just download it:** grab the latest **installer `.exe`** (or the no-install **portable `.exe`**) from the [**Releases page**](https://github.com/djutrsa/wrap-it-up/releases/latest) and run it.
+
+**Or build it yourself (any OS):**
+
+```bash
+npm run dist:win    # on Windows → dist/ : an installer .exe and a portable .exe
+npm run dist:mac    # on macOS   → dist/ : a .dmg
+```
+
+Install it and it stays out of your way: it comes up quietly in the tray when you log in, and a single running copy is enough no matter how many times you launch it. No `claude` CLI? Right-click the tray → **Set Claude API key…** and the AI wraps work from your key alone (stored encrypted on your machine; the plain, no-AI wrap always works too).
+
+These builds aren't code-signed yet, so your OS warns you once on first run:
+
+- **Windows:** *"Windows protected your PC"* → **More info → Run anyway**.
+- **macOS:** right-click the app → **Open → Open** (or *System Settings → Privacy & Security → Open Anyway*). If it's flagged as "damaged," clear the download flag once: `xattr -dr com.apple.quarantine "/Applications/Wrap It Up.app"`.
 
 ## License
 

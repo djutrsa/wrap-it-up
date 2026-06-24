@@ -1,14 +1,35 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, dialog, shell, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, dialog, shell, clipboard, Menu, Tray, nativeImage, safeStorage } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
+// Single instance: a second launch (e.g. the login-item AND a manual click) must NOT open a second
+// widget — it just reveals the one already running. requestSingleInstanceLock() returns false in the
+// second process; quit it immediately. Top-level return is legal in a CommonJS main module.
+if (!app.requestSingleInstanceLock()) {
+  if (process.argv.some((a) => a.startsWith('--smoke'))) { try { process.stdout.write('\n' + JSON.stringify({ ok: true, check: 'second-instance-exits', pid: process.pid }) + '\n'); } catch { /* ignore */ } }
+  app.quit();
+  return;
+}
+app.on('second-instance', () => revealWidget());
+
+// Distinguishes "user hid the widget" (keep running in the tray) from "user really wants to quit".
+// Without it, the first window close would end the app.
+app.isQuitting = false;
+
 // recorder_version = the ENGINE version (the thing that produces the wrap), not the widget shell —
 // that's the version contrast that makes "are new notes better?" meaningful. Root package.json is
 // two levels up from this widget folder. Best-effort current version (the wrap doesn't yet stamp its own).
-const APP_VERSION = (() => { try { return require(path.join(__dirname, '..', '..', 'package.json')).version; } catch { return null; } })();
+const APP_VERSION = (() => {
+  try {
+    // Packaged: the app's own version (canonical API). Dev (`electron <path>`): app.getVersion()
+    // can report Electron's version, so read the repo package.json to keep the real product version.
+    return app.isPackaged ? app.getVersion() : require(path.join(__dirname, '..', '..', 'package.json')).version;
+  } catch { try { return app.getVersion(); } catch { return null; } }
+})();
 
 let win;
+let didFinishCount = 0;   // increments on each widget did-finish-load (used by the crash-recreate smoke)
 
 // ---- feedback card: a passive, PERSISTENT re-entry card ----
 // One at a time. The card STAYS until you vote or close it — no auto-dismiss (it must never vanish
@@ -38,6 +59,7 @@ function createWindow() {
     fullscreenable: false,
     maximizable: false,
     minimizable: false,
+    show: false,                                // shown explicitly after load (unless launched --hidden)
     webPreferences: { nodeIntegration: true, contextIsolation: false },
   });
 
@@ -52,6 +74,8 @@ function createWindow() {
   // already has a wrap, enable the resume button on launch instead of only after a fresh
   // wrap this session.
   win.webContents.on('did-finish-load', () => {
+    didFinishCount++;
+    if (!launchedHidden()) win.show();          // reveal now; a login-launch with --hidden stays in the tray
     const folder = targetFolder();
     // Show "Where was I?" on launch only if there's a wrap AND it hasn't already been resumed
     // (reentryConsumed). A consumed re-entry stays collapsed across relaunch until the next wrap.
@@ -67,17 +91,76 @@ function createWindow() {
   // drifts away, and so a card that opened clipped at a screen edge follows the widget back into
   // view. No-op when no card is open. 'move' fires continuously during the OS drag.
   win.on('move', () => { placeCard(); signalCardMoving(); });
+
+  // Closing the widget (✕ / Esc / OS) HIDES it — the app keeps running in the tray. Only an explicit
+  // quit (quitApp) lets the window actually close. Without this, the first close would end the app.
+  win.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); hideWidget(); } });
+}
+
+// ---- headless lifecycle smoke (no clicking; driven by lifecycle-smoke.js). Each sub-check prints a
+// single last-line JSON object — same discipline as the engine — so the driver can parse it. ----
+function smokeMode() { const a = process.argv.find((x) => x.startsWith('--smoke')); return a ? (a.split('=')[1] || 'boot') : null; }
+function smokeLog(o) { try { process.stdout.write('\n' + JSON.stringify(o) + '\n'); } catch { /* ignore */ } }
+function runSmoke(mode) {
+  if (mode === 'hold') { smokeLog({ ok: true, check: 'hold', pid: process.pid }); return; }   // stay alive; the driver kills us
+  if (mode === 'trayprobe') {
+    // Verify the tray icon actually decodes to a non-empty image (this Electron's PNG codec is broken,
+    // so trayImage() uses raw-pixel createFromBitmap). Writes to a file so a Start-Process launch can read it.
+    let result;
+    try { const im = trayImage(); result = { ok: !im.isEmpty(), check: 'trayprobe', empty: im.isEmpty(), size: im.getSize() }; }
+    catch (e) { result = { ok: false, check: 'trayprobe', err: String((e && e.message) || e) }; }
+    try { fs.writeFileSync(path.join(app.getPath('temp'), 'wiu-trayprobe.json'), JSON.stringify(result)); } catch { /* ignore */ }
+    smokeLog(result);
+    quitApp();
+    return;
+  }
+  if (mode === 'menudump') {
+    // Headless check of the right-click / tray menu: dump each item's label + checkbox state AND prove
+    // Electron accepts the template — so a driver can assert the toggles (e.g. "Open wrap-up in editor")
+    // are present and well-formed without a human right-clicking. Writes to a file like trayprobe does.
+    let result;
+    try {
+      const items = buildMenuTemplate().map((i) => ({ label: i.label, type: i.type || 'normal', checked: i.checked }));
+      Menu.buildFromTemplate(buildMenuTemplate());
+      result = { ok: true, check: 'menudump', items };
+    } catch (e) { result = { ok: false, check: 'menudump', err: String((e && e.message) || e) }; }
+    try { fs.writeFileSync(path.join(app.getPath('temp'), 'wiu-menudump.json'), JSON.stringify(result)); } catch { /* ignore */ }
+    smokeLog(result);
+    quitApp();
+    return;
+  }
+  if (mode === 'crash') {
+    const start = Date.now();
+    const iv = setInterval(() => {
+      if (didFinishCount >= 2) { clearInterval(iv); smokeLog({ ok: true, check: 'window-recreated', crashCount }); quitApp(); }
+      else if (Date.now() - start > 9000) { clearInterval(iv); smokeLog({ ok: false, check: 'window-recreated', crashCount, didFinishCount }); quitApp(); }
+    }, 150);
+    setTimeout(() => { try { if (win && win.webContents) win.webContents.forcefullyCrashRenderer(); } catch { /* ignore */ } }, 1000);
+    return;
+  }
+  let trayImg = null;
+  try { const im = trayImage(); trayImg = { empty: im.isEmpty(), size: im.getSize() }; } catch (e) { trayImg = { err: String((e && e.message) || e) }; }
+  smokeLog({ ok: true, check: 'boot', tray: !!tray, trayImg, pid: process.pid });   // 'boot': we got here ⇒ nothing threw
+  quitApp();
 }
 
 app.whenReady().then(() => {
   createWindow();
-  globalShortcut.register('CommandOrControl+Shift+Q', () => app.quit());
+  createTray();
+  installCrashRecovery();
+  firstRunInit();
+  globalShortcut.register('CommandOrControl+Shift+Q', () => quitApp());
+  const sm = smokeMode();
+  if (sm) runSmoke(sm);
 });
+
+// Reopening from the macOS dock (or a re-`open`) shows the widget instead of doing nothing.
+app.on('activate', () => showWidget());
 
 ipcMain.on('set-interactive', (_e, interactive) => {
   if (win) win.setIgnoreMouseEvents(!interactive, { forward: true });
 });
-ipcMain.on('quit', () => app.quit());
+ipcMain.on('quit', () => hideWidget());   // Esc / ✕ from the renderer hides; Ctrl+Shift+Q quits
 
 // Window dragging is native now: the grip (left handle) is the only -webkit-app-region:drag surface,
 // so the OS moves the window itself — buttery, with none of the trailing that JS/IPC-driven dragging
@@ -96,23 +179,236 @@ async function changeFolder() {
   // Light up / grey out "Where was I?" for the new project (hydrate now toggles both ways).
   if (win) win.webContents.send('hydrate', { hasSave: hasExistingWrap(folder) });
 }
-function popupWidgetMenu() {
-  if (!win) return;
+// ---- window lifecycle: HIDE vs QUIT ----
+// The widget is tray-resident: closing it / Esc HIDES it (the app keeps running); only quitApp()
+// truly exits. revealWidget is also the second-instance response (a 2nd launch surfaces the running
+// widget instead of opening another).
+function showWidget() {
+  if (!win || win.isDestroyed()) { createWindow(); return; }
+  win.show();
+  win.setAlwaysOnTop(true, 'screen-saver');
+  refreshTray();
+}
+function hideWidget() {
+  if (win && !win.isDestroyed()) win.hide();
+  closeCard();                                   // don't leave a feedback card floating over the desktop
+  refreshTray();
+}
+function toggleWidget() {
+  if (win && !win.isDestroyed() && win.isVisible()) hideWidget(); else showWidget();
+}
+function revealWidget() {
+  showWidget();
+  try {
+    if (win && !win.isDestroyed()) {
+      win.focus();
+      if (process.platform === 'win32') { win.flashFrame(true); setTimeout(() => { try { if (win && !win.isDestroyed()) win.flashFrame(false); } catch { /* ignore */ } }, 1200); }
+    }
+  } catch { /* ignore */ }
+}
+function quitApp() { app.isQuitting = true; app.quit(); }
+
+// True when started by the login-item (registered with a `--hidden` arg) → come up in the tray
+// WITHOUT popping the widget in front of whatever the user opens at boot.
+function launchedHidden() {
+  if (process.argv.includes('--hidden')) return true;
+  if (process.argv.some((a) => a.startsWith('--smoke'))) return true;   // smoke runs never flash a window
+  try { return process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAsHidden === true; } catch { return false; }
+}
+
+// ---- the shared menu (ONE source for both the tray context menu and the right-click menu) ----
+function buildMenuTemplate() {
   const cfg = readCfg();
-  Menu.buildFromTemplate([
+  const folder = targetFolder();
+  const visible = !!(win && !win.isDestroyed() && win.isVisible());
+  const hasKey = !!(cfg.apiKeyEnc || cfg.apiKeyPlain);
+  const ai = aiStatus();
+  const aiLabel = ai === 'cli' ? 'AI: Claude CLI' : ai === 'key' ? 'AI: API key' : 'AI: off (local only)';
+  const items = [
+    { label: folder ? `Wrapping: ${path.basename(folder)}` : 'No project — pick one…', enabled: !folder, click: folder ? undefined : () => changeFolder() },
+    { type: 'separator' },
+    { label: visible ? 'Hide widget' : 'Show widget', click: () => toggleWidget() },
     { label: 'Change project folder…', click: () => changeFolder() },
     { type: 'separator' },
-    {
-      label: 'Share anonymous usage data',
-      type: 'checkbox',
-      checked: cfg.telemetryConsent === true,
-      click: (item) => setTelemetryConsent(item.checked),
-    },
+    { label: 'Set Claude API key…', click: () => openKeyPrompt() },
+  ];
+  if (hasKey) items.push({ label: 'Clear API key', click: () => clearKey() });
+  items.push(
+    { label: aiLabel, enabled: false },
     { type: 'separator' },
-    { label: 'Quit Wrap It Up', click: () => app.quit() },
-  ]).popup({ window: win });   // no x/y → pops at the cursor (the system-context-menu point is in
-                               // SCREEN coords, but popup x/y are window-relative; cursor is correct)
+    { label: 'Start at login', type: 'checkbox', checked: cfg.openAtLogin === true, click: (it) => setOpenAtLogin(it.checked) },
+    { label: 'Open wrap-up in editor', type: 'checkbox', checked: cfg.openWrapInEditor !== false, click: (it) => setOpenWrapInEditor(it.checked) },
+    { label: 'Share anonymous usage data', type: 'checkbox', checked: cfg.telemetryConsent === true, click: (it) => setTelemetryConsent(it.checked) },
+    { type: 'separator' },
+    { label: 'Quit Wrap It Up', click: () => quitApp() }
+  );
+  return items;
 }
+function popupWidgetMenu() {
+  if (!win) return;
+  Menu.buildFromTemplate(buildMenuTemplate()).popup({ window: win });
+}
+
+// ---- system tray: the management home (the widget is skipTaskbar + frameless, so without this its
+// only controls are right-click + a global shortcut). IMPORTANT: this Electron build's main-process PNG
+// DECODER is broken — createFromDataURL/createFromBuffer/createFromPath all return an EMPTY image (HTML/
+// SVG rendering in a BrowserWindow is a different path and works fine, which is why the widget itself
+// looks right). So the tray is fed RAW PIXELS via createFromBitmap (no decode): the honey "present" art
+// as 32×32 straight BGRA (Windows/Linux native order). Regenerate from build/icon.png if the art changes. ----
+let tray = null;
+const TRAY_W = 32, TRAY_H = 32;
+function trayImage() {
+  // createFromBitmap stores pixel data directly — the ONLY image path that works in this Electron build
+  // (its main-process PNG codec is broken). The art ships as raw 32×32 BGRA pixels (assets/tray.bgra),
+  // which fs reads straight from disk — or transparently from inside app.asar when packaged.
+  try {
+    return nativeImage.createFromBitmap(fs.readFileSync(path.join(__dirname, 'assets', 'tray.bgra')), { width: TRAY_W, height: TRAY_H });
+  } catch { return nativeImage.createEmpty(); }
+}
+function tooltipText() {
+  const folder = targetFolder();
+  return 'Wrap It Up — ' + (folder ? path.basename(folder) : 'no project');
+}
+function refreshTray() {
+  if (!tray) return;
+  try { tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate())); tray.setToolTip(tooltipText()); } catch { /* ignore */ }
+}
+function createTray() {
+  if (tray) return;
+  try {
+    tray = new Tray(trayImage());
+    tray.setToolTip(tooltipText());
+    tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate()));
+    // Win/Linux: left-click toggles the widget. macOS convention is left-click → menu (already wired
+    // by setContextMenu), so don't bind a toggle there.
+    if (process.platform !== 'darwin') tray.on('click', () => toggleWidget());
+  } catch { /* a tray is best-effort; the app still works without it */ }
+}
+
+// ---- auto-start on login (decision #5) ----
+// Only registers the OS login item when PACKAGED — running from source would otherwise register a
+// dev electron.exe. The preference is persisted either way so the tray checkbox is consistent.
+function setOpenAtLogin(on) {
+  try {
+    if (app.isPackaged) {
+      const opts = { openAtLogin: !!on };
+      if (process.platform === 'win32') { opts.path = process.execPath; opts.args = ['--hidden']; }
+      app.setLoginItemSettings(opts);
+    }
+  } catch { /* ignore */ }
+  writeCfg({ openAtLogin: !!on });
+  refreshTray();
+}
+// ---- auto-open the wrap-up note in the default .md editor on "pick up" ----
+// ON by default (preserves the original behavior). A user who finds the editor popping to the front
+// intrusive can switch it off and just take the paste-ready prompt + the feedback card; the note is
+// still written to disk either way. Persisted so the checkbox sticks across relaunch.
+function setOpenWrapInEditor(on) { writeCfg({ openWrapInEditor: !!on }); refreshTray(); }
+// Once per install: default auto-start ON (packaged only), plus a one-time, NON-BLOCKING nudge to add
+// an API key when neither the CLI nor a key is present. Skipped entirely under --smoke (hermetic runs).
+function firstRunInit() {
+  if (process.argv.some((a) => a.startsWith('--smoke'))) return;
+  const cfg = readCfg();
+  if (app.isPackaged && cfg.openAtLogin === undefined) setOpenAtLogin(true);
+  if (!cfg.aiNudgeShown && aiStatus() === 'off') {
+    writeCfg({ aiNudgeShown: true });
+    if (process.platform === 'win32' && tray) {
+      try { tray.displayBalloon({ title: 'Wrap It Up', content: 'Tip: add a Claude API key (right-click the tray) for AI wraps — it also works local-only.' }); } catch { /* ignore */ }
+    }
+  }
+}
+
+// ---- crash resilience (in-app only; no external watchdog — decision #7) ----
+let crashCount = 0, crashWindowStart = Date.now();
+const CRASH_MAX = 3, CRASH_WINDOW_MS = 60_000;
+function recreateAfterCrash() {
+  if (app.isQuitting) return;
+  const now = Date.now();
+  if (now - crashWindowStart > CRASH_WINDOW_MS) { crashWindowStart = now; crashCount = 0; }
+  if (++crashCount > CRASH_MAX) return;                 // stop after a tight crash loop; the tray stays alive
+  const delay = Math.min(4000, 250 * 2 ** (crashCount - 1));
+  setTimeout(() => { try { if (win && !win.isDestroyed()) win.destroy(); } catch { /* ignore */ } win = null; createWindow(); }, delay);
+}
+function installCrashRecovery() {
+  app.on('render-process-gone', (_e, wc, details) => {
+    if (app.isQuitting || !details || details.reason === 'clean-exit') return;
+    if (card && wc === card.webContents) { closeCard(); return; }   // a card-renderer crash is ephemeral
+    if (win && wc === win.webContents) recreateAfterCrash();
+  });
+  // Engine spawns are plain Node children (NOT Electron children), so they're covered by runEngine's
+  // own guards, not this event. GPU/utility deaths usually self-recover; stay conservative.
+  app.on('child-process-gone', () => { /* logged by Electron; no action */ });
+}
+
+// ---- BYO Claude API key (decision #8): a machine with NO `claude` CLI still gets AI wraps from a key.
+// Stored encrypted-at-rest via safeStorage (DPAPI/Keychain); plaintext only as a last resort. The key
+// lives in the widget config and is injected into the engine spawn as ANTHROPIC_API_KEY — it is NEVER
+// part of a feedback event, so the telemetry allowlist structurally can't carry it off the machine. ----
+function saveKey(plain) {
+  const k = (plain || '').trim();
+  if (!k) return;
+  try {
+    if (safeStorage.isEncryptionAvailable()) writeCfg({ apiKeyEnc: safeStorage.encryptString(k).toString('base64'), apiKeyPlain: null });
+    else writeCfg({ apiKeyEnc: null, apiKeyPlain: k });
+  } catch { writeCfg({ apiKeyEnc: null, apiKeyPlain: k }); }
+  refreshTray();
+}
+function loadKey() {
+  const c = readCfg();
+  try {
+    if (c.apiKeyEnc && safeStorage.isEncryptionAvailable()) return safeStorage.decryptString(Buffer.from(c.apiKeyEnc, 'base64')).trim() || null;
+  } catch { return null; }            // fail closed → engine falls back to CLI/local
+  return (c.apiKeyPlain || '').trim() || null;
+}
+function clearKey() { writeCfg({ apiKeyEnc: null, apiKeyPlain: null }); refreshTray(); }
+
+// Cheap PATH probe mirroring the engine's hasClaudeCli() (cli.ts) — drives the tray AI-status line.
+function hasClaudeCliInPath() {
+  if (process.env.WRAPITUP_CLAUDE_BIN) return true;
+  const exts = process.platform === 'win32' ? ['', '.cmd', '.ps1', '.exe'] : [''];
+  for (const d of (process.env.PATH || '').split(path.delimiter)) {
+    if (!d) continue;
+    for (const e of exts) { try { if (fs.existsSync(path.join(d, 'claude' + e))) return true; } catch { /* ignore */ } }
+  }
+  return false;
+}
+function aiStatus() { return hasClaudeCliInPath() ? 'cli' : (loadKey() ? 'key' : 'off'); }
+
+// The env for every engine spawn. Injects the stored key as ANTHROPIC_API_KEY ONLY when one isn't
+// already in the environment — so the `claude` CLI stays the preferred provider (cli.ts tries CLI
+// first, the key second).
+function spawnEnv() {
+  const e = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+  const k = loadKey();
+  if (k && !e.ANTHROPIC_API_KEY) e.ANTHROPIC_API_KEY = k;
+  return e;
+}
+
+// Electron has no native text prompt, so reuse the frameless-window pattern (like the card) for a tiny
+// key-entry surface. Unlike the card it MUST be focusable — you type into it.
+let keyWin = null;
+function openKeyPrompt() {
+  if (keyWin && !keyWin.isDestroyed()) { try { keyWin.focus(); } catch { /* ignore */ } return; }
+  const W = 400, H = 214;
+  const area = screen.getPrimaryDisplay().workAreaSize;
+  keyWin = new BrowserWindow({
+    width: W, height: H,
+    x: Math.round(area.width / 2 - W / 2), y: Math.round(area.height / 2 - H / 2),
+    frame: false, transparent: true, backgroundColor: '#00000000',
+    alwaysOnTop: true, resizable: false, skipTaskbar: true, hasShadow: false,
+    focusable: true, fullscreenable: false, maximizable: false, minimizable: false,
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+  });
+  keyWin.setAlwaysOnTop(true, 'screen-saver');
+  keyWin.on('closed', () => { keyWin = null; });
+  keyWin.webContents.on('did-finish-load', () => {
+    if (keyWin) { keyWin.webContents.send('key-data', { present: !!loadKey(), status: aiStatus() }); keyWin.show(); keyWin.focus(); }
+  });
+  keyWin.loadFile(path.join(__dirname, 'prompt.html'));
+}
+ipcMain.on('apikey-save', (_e, v) => { saveKey(v); if (keyWin && !keyWin.isDestroyed()) keyWin.close(); });
+ipcMain.on('apikey-clear', () => { clearKey(); if (keyWin && !keyWin.isDestroyed()) keyWin.close(); });
+ipcMain.on('apikey-cancel', () => { if (keyWin && !keyWin.isDestroyed()) keyWin.close(); });
 // Opt-in anonymous telemetry (OFF by default). On first enable, mint a random per-install id (NOT
 // identifying — it only groups one install's rows). Only metadata feedback rows are ever sent
 // (perceived rating, reason chip, re-entry outcome, versions, session flags) — NEVER wrap text/code.
@@ -133,9 +429,15 @@ ipcMain.on('show-menu', () => popupWidgetMenu());            // from the no-drag
 // ---- engine wiring: the buttons spawn the headless broker CLI on the target project ----
 // (spawn-per-trigger). Runs the CLI via Electron-as-Node, so no separate
 // node install is needed. The target project is remembered between runs; first run prompts.
-const REPO = path.join(__dirname, '..', '..');                  // <repo>
-const ENGINE = path.join(REPO, 'out', 'cli.js');                // <repo>/out/cli.js (compiled per build)
-const TSC = path.join(REPO, 'node_modules', 'typescript', 'bin', 'tsc');
+// Resolve the compiled engine (out/cli.js), spawned per click via Electron-as-Node. Dev:
+// <repo>/out/cli.js, kept fresh by the background `tsc -w` during `npm run dev`. Packaged:
+// out/ is asarUnpack'd, so it lives beside app.asar as a REAL file — a path INSIDE app.asar
+// can't be spawned as a child process. No on-the-fly compile anymore (the engine is frozen).
+function enginePath() {
+  if (!app.isPackaged) return path.join(__dirname, '..', '..', 'out', 'cli.js');
+  return path.join(process.resourcesPath, 'app.asar.unpacked', 'out', 'cli.js');
+}
+const ENGINE = enginePath();
 const CFG = path.join(app.getPath('userData'), 'wrapitup-widget.json');
 
 function targetFolder() {
@@ -180,55 +482,15 @@ async function pickFolder() {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Wrap It Up — pick the project to wrap' });
   return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
 }
-// Auto-build before the engine runs: the engine is plain compiled JS spawned per click, so an
-// edit to the TS source won't take effect until it's recompiled. Rebuild on demand — but ONLY
-// when the source is actually newer than out/cli.js, so a normal click (nothing changed) pays
-// only a few stat() calls. A full `tsc -p` re-emits every out/*.js, so out/cli.js's mtime is a
-// reliable "last build" stamp to compare against.
-function newestTsMtime(dir) {
-  let newest = 0;
-  const stack = [dir];
-  while (stack.length) {
-    const d = stack.pop();
-    let entries;
-    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries) {
-      if (e.isDirectory()) { if (e.name !== 'node_modules') stack.push(path.join(d, e.name)); }
-      else if (e.name.endsWith('.ts')) {
-        try { const m = fs.statSync(path.join(d, e.name)).mtimeMs; if (m > newest) newest = m; } catch { /* ignore */ }
-      }
-    }
-  }
-  return newest;
-}
-function engineIsStale() {
-  let outM;
-  try { outM = fs.statSync(ENGINE).mtimeMs; } catch { return true; }   // not built yet → must build
-  return newestTsMtime(path.join(REPO, 'src')) > outM;
-}
-function compileEngine() {
-  return new Promise((resolve) => {
-    if (!fs.existsSync(TSC)) return resolve(false);                     // no local tsc → run the existing engine
-    const p = spawn(process.execPath, [TSC, '-p', REPO],
-      { cwd: REPO, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
-    p.on('close', (code) => resolve(code === 0));
-    p.on('error', () => resolve(false));
-  });
-}
-// Rebuild if stale; never block the wrap on a compile failure — fall back to the last good engine.
-async function ensureBuilt() {
-  try { if (engineIsStale()) await compileEngine(); } catch { /* run whatever exists */ }
-}
-
 async function runEngine(cmd, folder, source, extraArgs) {
-  await ensureBuilt();                                                  // auto-compile when the TS source changed
   return new Promise((resolve) => {
+    if (!fs.existsSync(ENGINE)) return resolve({ ok: false, reason: 'engine missing' });
     let out = '';
     const args = [ENGINE, cmd, '--cwd', folder];
     if (source) args.push('--source', source);
     if (extraArgs) args.push(...extraArgs);
     const p = spawn(process.execPath, args,
-      { cwd: folder, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+      { cwd: folder, env: spawnEnv() });
     p.stdout.on('data', (d) => (out += d));
     p.on('close', () => { try { resolve(JSON.parse(out.trim().split('\n').filter(Boolean).pop())); } catch { resolve({ ok: false }); } });
     p.on('error', () => resolve({ ok: false, reason: 'spawn failed' }));
@@ -243,7 +505,7 @@ function runFeedback(folder, event) {
   let p;
   try {
     p = spawn(process.execPath, [ENGINE, 'feedback', '--cwd', folder],
-      { cwd: folder, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+      { cwd: folder, env: spawnEnv() });
   } catch { return; }
   p.on('error', () => { /* ignore */ });
   p.stdin.on('error', () => { /* ignore EPIPE */ });
@@ -279,7 +541,7 @@ ipcMain.on('resume', async () => {
   let copied = false;
   if (res && res.ok) {
     if (res.nextPrompt) { clipboard.writeText(res.nextPrompt); copied = true; } // paste-ready into Claude Code
-    if (res.file) shell.openPath(res.file);                                      // and open the wrap to read
+    if (res.file && readCfg().openWrapInEditor !== false) shell.openPath(res.file); // open the wrap to read (unless the user turned this off)
     // Open the passive feedback card — INDEPENDENT of the copy/open above (it never gates re-entry).
     const eventId = `fb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const showReentry = !!(res.prev && cfg.lastFeedbackEventId); // a genuinely earlier note + a row to patch
@@ -424,5 +686,7 @@ ipcMain.on('regenerate-request', async (_e, r) => {
   try { card.webContents.send('regenerate-result', res || { ok: false }); } catch { /* ignore */ }
 });
 
-app.on('window-all-closed', () => app.quit());
+// Tray-resident: closing the widget window does NOT quit. Quitting is explicit (quitApp / tray / shortcut).
+app.on('window-all-closed', () => { /* no-op: the tray keeps the app alive */ });
+app.on('before-quit', () => { app.isQuitting = true; if (tray) { try { tray.destroy(); } catch { /* ignore */ } tray = null; } });
 app.on('will-quit', () => globalShortcut.unregisterAll());

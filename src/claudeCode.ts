@@ -136,7 +136,7 @@ const resultText = (content: unknown): string => {
 // STATUS: a Bash/PowerShell tool_result carries `is_error` (and "Exit code N" in
 // its text on failure) -> shell.exec pass/fail -> the engine's status verdict.
 // Edit/Write/MultiEdit -> file changes (created/touched, reconciled vs git later).
-export function transcriptToEvents(file: string): WrapEvent[] {
+export function transcriptToEvents(file: string, folder?: string): WrapEvent[] {
   const events: WrapEvent[] = [];
   let lines: string[];
   try {
@@ -147,6 +147,14 @@ export function transcriptToEvents(file: string): WrapEvent[] {
 
   const cmdById = new Map<string, string>(); // tool_use_id -> shell command
   let seq = 0; // monotonic fallback clock when timestamps are missing
+
+  // Scope file edits to the wrap TARGET. An external agent's transcript records edits ALL OVER the
+  // machine — scratch/temp dirs, OTHER repos — and listing those as the project's "active files" is
+  // cross-folder contamination (a scratch file surfaced as a project edit). Keep relative paths (they
+  // resolve under the project cwd) and absolute paths inside the target; drop absolute paths outside it.
+  // shell.exec carries no path, so command evidence is unaffected. No folder ⇒ no scoping (back-compat).
+  const want = folder ? norm(folder) : null;
+  const inScope = (p: string): boolean => !want || !path.isAbsolute(p) || isAncestorOrEqual(want, norm(p));
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -170,19 +178,19 @@ export function transcriptToEvents(file: string): WrapEvent[] {
           if (b.id) cmdById.set(b.id, clipCmd(String(inp.command || "")));
         } else if (name === "Edit" || name === "MultiEdit") {
           const uri = inp.file_path;
-          if (uri) {
+          if (uri && inScope(uri)) {
             events.push({ t, kind: "doc.change", uri, lang: langOf(uri), churn: 1, dirty: false });
             events.push({ t, kind: "fs.change", uri, op: "change" });
           }
         } else if (name === "NotebookEdit") {
           const uri = inp.notebook_path || inp.file_path;
-          if (uri) {
+          if (uri && inScope(uri)) {
             events.push({ t, kind: "doc.change", uri, lang: langOf(uri), churn: 1, dirty: false });
             events.push({ t, kind: "fs.change", uri, op: "change" });
           }
         } else if (name === "Write") {
           const uri = inp.file_path;
-          if (uri) {
+          if (uri && inScope(uri)) {
             events.push({ t, kind: "doc.change", uri, lang: langOf(uri), churn: 1, dirty: false });
             // Treat Write as a create; reconcileGitStatus() demotes it to a
             // modification when git shows the file already existed at HEAD.

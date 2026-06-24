@@ -106,7 +106,7 @@ function buildCtx(folder: string): SessionContext {
 // into events, reduce to grounded facts, then reconcile created/touched against
 // git's authoritative "vs HEAD" truth (same pipeline the editor recorder feeds).
 function buildCtxFromTranscript(folder: string, file: string): SessionContext {
-  const events = transcriptToEvents(file);
+  const events = transcriptToEvents(file, folder);
   const conversation = transcriptToConversation(file); // chat-AWARE signal (reduced to a digest at enrich time)
   const git = readGit(folder);
   const derived = reconcileGitStatus(reduceEvents(events), git);
