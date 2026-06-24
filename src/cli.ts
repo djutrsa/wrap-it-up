@@ -198,7 +198,17 @@ function runClaudeCli(modelArg: string, effort: string, system: string, user: st
         return reject(new Error(`claude -p exit ${code}: ${detail.slice(0, 300)}`));
       }
       try {
-        resolve(parseJsonLoose(String(JSON.parse(out).result || "")));
+        const parsed = JSON.parse(out);
+        // Capture the model the CLI ACTUALLY used, for honest telemetry. The `-p` JSON has NO top-level
+        // `model`; the real id(s) are the KEYS of `modelUsage` (e.g. "claude-opus-4-8[1m]") — pick the
+        // most-used one. On the fallback attempt this is whatever the CLI resolved as its own default.
+        const mu = parsed.modelUsage && typeof parsed.modelUsage === "object" ? parsed.modelUsage : {};
+        // Pick the GENERATION model — the one that wrote the most OUTPUT. Claude Code also bills a tiny
+        // auxiliary haiku call, and the main model's input is mostly CACHED (so raw inputTokens is
+        // misleading). Weight output so it dominates; tiebreak by total input incl. cache.
+        const score = (u: any) => (u?.outputTokens || 0) * 1e7 + (u?.inputTokens || 0) + (u?.cacheReadInputTokens || 0) + (u?.cacheCreationInputTokens || 0);
+        const model = Object.keys(mu).sort((a, b) => score(mu[b]) - score(mu[a]))[0] || (typeof parsed.model === "string" ? parsed.model : "");
+        resolve({ obj: parseJsonLoose(String(parsed.result || "")), model });
       } catch {
         reject(new Error("claude -p returned unparseable output"));
       }
@@ -234,7 +244,7 @@ function callClaudeCli(preferredModel: string, system: string, user: string): Pr
 // 2) ANTHROPIC_API_KEY direct API, 3) local-only. A provider that fails falls
 // through to the next; "failed" is reported only when a provider was tried and
 // none succeeded. With no provider at all the local wrap stands (enrichment "pending").
-async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapUp; err?: string }> {
+async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapUp; err?: string; model?: string }> {
   if (process.env.WRAPITUP_NO_LLM === "1") return { wrap: local };
   // WRAPITUP_MODEL is OPTIONAL. The CLI path treats it as the PREFERRED model — empty ⇒ callClaudeCli
   // prefers "sonnet" at medium effort and gracefully falls back to the CLI's own resolved default if the
@@ -251,7 +261,8 @@ async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapU
   if (process.env.WRAPITUP_NO_CLI !== "1" && hasClaudeCli()) {
     attempted = true;
     try {
-      return { wrap: E.applyEnrichmentObj(local, await callClaudeCli(cliModel, system, user)) };
+      const r = await callClaudeCli(cliModel, system, user);
+      return { wrap: E.applyEnrichmentObj(local, r.obj), model: r.model };
     } catch (e: any) {
       lastErr = String(e?.message || e);
     }
@@ -261,7 +272,8 @@ async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapU
   if (key) {
     attempted = true;
     try {
-      return { wrap: E.applyEnrichmentObj(local, await callClaudeTool(key, apiModel, system, user, E.WRAP_TOOL)) };
+      // The API path uses the concrete model id we pass, so apiModel IS the model that ran.
+      return { wrap: E.applyEnrichmentObj(local, await callClaudeTool(key, apiModel, system, user, E.WRAP_TOOL)), model: apiModel };
     } catch (e: any) {
       lastErr = String(e?.message || e);
     }
@@ -271,7 +283,13 @@ async function enrich(ctx: SessionContext, local: WrapUp): Promise<{ wrap: WrapU
   return { wrap: local };
 }
 
-async function doWrap(folder: string, source: string): Promise<{ file: string; wrap: WrapUp; usedSource: string }> {
+// A hidden, machine-readable marker recording which model produced the wrap. Read back by `resume` so
+// the feedback row logs the model that ACTUALLY ran (not a hardcoded guess). Empty model ⇒ no marker.
+function modelMarker(model?: string): string {
+  return model ? `\n<!-- wiu-model: ${model} -->\n` : "";
+}
+
+async function doWrap(folder: string, source: string): Promise<{ file: string; wrap: WrapUp; usedSource: string; model?: string }> {
   let ctx: SessionContext | null = null;
   let usedSource = "git";
   if (source !== "git") {
@@ -301,11 +319,11 @@ async function doWrap(folder: string, source: string): Promise<{ file: string; w
   const file = path.join(dir, new Date().toISOString().replace(/[:.]/g, "-") + ".md");
   fs.writeFileSync(file, renderWrapMarkdown(local, ctx), "utf8"); // local-first: never lost
 
-  const { wrap, err } = await enrich(ctx, local);
-  const tail = err ? `\n<!-- AI enrichment failed: ${err.slice(0, 200)} -->\n` : "";
+  const { wrap, err, model } = await enrich(ctx, local);
+  const tail = (err ? `\n<!-- AI enrichment failed: ${err.slice(0, 200)} -->\n` : "") + modelMarker(model);
   fs.writeFileSync(file, renderWrapMarkdown(wrap, ctx) + tail, "utf8");
   writeCtxSidecar(file, ctx); // persist the capture so a later regenerate can re-enrich it (local-only)
-  return { file, wrap, usedSource };
+  return { file, wrap, usedSource, model };
 }
 
 // The capture sidecar: <wrapId>.ctx.json next to the wrap .md (in .wrap-it-up/wrapups/, which is
@@ -358,8 +376,8 @@ async function doRegenerate(
   ctx.nudge = nudge;
 
   const local = buildLocalWrap(ctx);
-  const { wrap, err } = await enrich(ctx, local);
-  const tail = err ? `\n<!-- AI enrichment failed: ${err.slice(0, 200)} -->\n` : "";
+  const { wrap, err, model } = await enrich(ctx, local);
+  const tail = (err ? `\n<!-- AI enrichment failed: ${err.slice(0, 200)} -->\n` : "") + modelMarker(model);
   fs.writeFileSync(file, renderWrapMarkdown(wrap, ctx) + tail, "utf8"); // overwrite in place
   writeCtxSidecar(file, ctx);
   appendRegeneration(folder, { ts: new Date().toISOString(), wrap_id: wrapIdFromFile(file), reason, nudge, title: wrap.title });
@@ -428,11 +446,11 @@ async function main(): Promise<void> {
   if (cmd === "wrap") {
     const si = args.indexOf("--source");
     const source = si >= 0 && args[si + 1] ? args[si + 1] : "claude-code";
-    const { file, wrap, usedSource } = await doWrap(folder, source);
+    const { file, wrap, usedSource, model } = await doWrap(folder, source);
     const md = fs.readFileSync(file, "utf8");
     const nextMove = grab(md, /\*\*Suggested next move:\*\*\s*\n>\s*(.+)/) || wrap.suggestedNextAction;
     process.stdout.write(
-      JSON.stringify({ ok: true, file, title: wrap.title, status: wrap.status, nextMove, source: usedSource }) + "\n"
+      JSON.stringify({ ok: true, file, title: wrap.title, status: wrap.status, nextMove, source: usedSource, model: model || null }) + "\n"
     );
   } else if (cmd === "resume") {
     const file = latestWrap(folder);
@@ -441,6 +459,7 @@ async function main(): Promise<void> {
       return;
     }
     const md = fs.readFileSync(file, "utf8");
+    const modelUsed = grab(md, /<!-- wiu-model: (.+?) -->/); // the model that actually wrote this wrap (honest telemetry)
     let nextPrompt = extractNextPrompt(md) || "";
     const title = grab(md, /^#\s+(.+)/m) || "your last session";
     const nextMove = grab(md, /\*\*Suggested next move:\*\*\s*\n>\s*(.+)/) || "";
@@ -467,7 +486,7 @@ async function main(): Promise<void> {
       }
     }
     process.stdout.write(
-      JSON.stringify({ ok: true, file, wrapId, title, nextMove, nextPrompt, prev }) + "\n"
+      JSON.stringify({ ok: true, file, wrapId, title, nextMove, nextPrompt, prev, modelUsed }) + "\n"
     );
   } else if (cmd === "feedback") {
     // `--report`: a one-screen, vote-based quality readout (no model call) for the beta go/no-go.

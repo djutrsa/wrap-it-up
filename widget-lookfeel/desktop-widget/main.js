@@ -548,7 +548,7 @@ ipcMain.on('resume', async () => {
     openCard(
       { nextMove: res.nextMove, copied, reentry: showReentry ? { title: res.prev.title } : null },
       { folder, wrapId: res.wrapId, eventId, pressTs: new Date().toISOString(),
-        prevEventId: showReentry ? cfg.lastFeedbackEventId : null }
+        prevEventId: showReentry ? cfg.lastFeedbackEventId : null, modelUsed: res.modelUsed || null }
     );
     // Remember this press as the next re-entry's Clock-2 target. Mark the re-entry consumed so the
     // widget collapses to 1 button and STAYS collapsed across relaunch until the next wrap re-arms it.
@@ -577,7 +577,7 @@ function writePerceived(r) {
     respond_vs_dismiss: r.respond_vs_dismiss,
     reason_chip: r.reason_chip || null,
     recorder_version: APP_VERSION,
-    model_version: process.env.WRAPITUP_MODEL || 'claude-sonnet-4-6',
+    model_version: cardCtx.modelUsed || null,   // the model that ACTUALLY wrote this wrap (read back via resume); null if unknown — never a hardcoded guess
     session_context: {},                     // dogfood: little known at capture; log what we can later
   });
 }

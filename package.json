@@ -2,7 +2,7 @@
   "name": "wrap-it-up",
   "displayName": "Wrap It Up",
   "description": "One-click session wrap-up for AI-assisted coding. Passive recorder + local wrap-up. No external actions.",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "publisher": "wrapitup-dev",
   "private": true,
   "engines": {
