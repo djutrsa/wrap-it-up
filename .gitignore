@@ -1,5 +1,6 @@
 # Build output
 out/
+dist/
 *.vsix
 
 # Dependencies
@@ -10,6 +11,10 @@ node_modules/
 
 # Local-only working material
 writing/
+
+# Launch-video / promo output (large binaries + licensed assets — never published)
+brag-output/
+*.mp4
 
 # OS / editor cruft
 .DS_Store
