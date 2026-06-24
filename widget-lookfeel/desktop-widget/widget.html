@@ -1,3 +1,4 @@
+<!-- Theme system: data-theme="honey|purple|space-blue" on .wiu swaps a full set of CSS custom-property tokens (colors, shadows, gradients) defined per-theme in the <style> block below. -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -53,6 +54,24 @@
     --glow-color:rgba(168,85,247,.55);
     --sheen:rgba(220,190,255,.20);
     --label-shadow:rgba(20,8,40,.55);
+  }
+  /* ===== Space Blue theme ===== */
+  .wiu[data-theme="space-blue"]{
+    --body-bg:linear-gradient(180deg, rgba(8,18,52,.97) 0%, rgba(6,14,42,.96) 45%, rgba(4,10,32,.97) 100%);
+    --body-shadow:0 12px 30px -8px rgba(0,10,40,.65), 0 2px 7px -2px rgba(0,10,40,.45), inset 0 1px 0 rgba(100,220,255,.25), inset 0 0 0 1px rgba(100,220,255,.10);
+    --hover-shadow:0 18px 40px -10px rgba(0,10,40,.72), 0 4px 10px -3px rgba(0,10,40,.5), inset 0 1px 0 rgba(100,220,255,.32);
+    --fg:rgba(220,245,255,.96);
+    --grip:rgba(100,200,255,.32); --grip-hover:rgba(100,200,255,.52);
+    --sweep-color:#22D3EE;
+    --disc-primary:linear-gradient(180deg,#06B6D4,#0284C7);
+    --disc-primary-hover:linear-gradient(180deg,#22D3EE,#0EA5E9);
+    --disc-primary-shadow:inset 0 1px 0 rgba(255,255,255,.28), 0 3px 8px -2px rgba(0,140,200,.55);
+    --disc-secondary:rgba(210,240,255,.88); --disc-secondary-fg:rgba(4,24,60,.95);
+    --disc-secondary-shadow:inset 0 1px 0 rgba(255,255,255,.55), inset 0 0 0 1px rgba(60,160,220,.18), 0 2px 5px -2px rgba(0,10,40,.35);
+    --disc-secondary-hover:rgba(230,248,255,.96);
+    --glow-color:rgba(34,211,238,.55);
+    --sheen:rgba(100,220,255,.14);
+    --label-shadow:rgba(0,10,40,.65);
   }
   .wiu .body{ position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; padding:var(--pad);
     border-radius:var(--radius); background:var(--body-bg); backdrop-filter:var(--backdrop); -webkit-backdrop-filter:var(--backdrop);
