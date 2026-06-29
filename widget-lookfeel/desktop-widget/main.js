@@ -3,6 +3,12 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
+// Pin the app identity BEFORE the single-instance lock or any getPath('userData') read, so every
+// launch method — installed app, `npm start`, and `npx wrap-it-up` — shares ONE userData dir + lock.
+// The installed app already resolves to 'wrap-it-up' (root package name); this just makes it explicit
+// and stops dev/npx from splintering into separate wrap-it-up-widget / Electron config profiles.
+app.setName('wrap-it-up');
+
 // Single instance: a second launch (e.g. the login-item AND a manual click) must NOT open a second
 // widget — it just reveals the one already running. requestSingleInstanceLock() returns false in the
 // second process; quit it immediately. Top-level return is legal in a CommonJS main module.
@@ -11,7 +17,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
   return;
 }
-app.on('second-instance', () => revealWidget());
+app.on('second-instance', (_e, argv) => { seedProjectFromArgv(argv); revealWidget(); });
 
 // Distinguishes "user hid the widget" (keep running in the tray) from "user really wants to quit".
 // Without it, the first window close would end the app.
@@ -79,7 +85,10 @@ function createWindow() {
     const folder = targetFolder();
     // Show "Where was I?" on launch only if there's a wrap AND it hasn't already been resumed
     // (reentryConsumed). A consumed re-entry stays collapsed across relaunch until the next wrap.
-    if (folder && hasExistingWrap(folder) && !readCfg().reentryConsumed) win.webContents.send('hydrate', { hasSave: true, theme: readCfg().colorTheme || 'honey' });
+    // No project chosen yet → rest the pill on a single "Choose folder" button (onboarding). The
+    // installed/login launch hits this until a folder is picked; the terminal (npx --project) seeds one.
+    if (!folder) win.webContents.send('hydrate', { noFolder: true, theme: readCfg().colorTheme || 'honey' });
+    else if (hasExistingWrap(folder) && !readCfg().reentryConsumed) win.webContents.send('hydrate', { hasSave: true, theme: readCfg().colorTheme || 'honey' });
     win.webContents.send('set-theme', readCfg().colorTheme || 'honey');
   });
 
@@ -130,6 +139,32 @@ function runSmoke(mode) {
     quitApp();
     return;
   }
+  if (mode === 'udpath') {
+    // Headless probe for the npx tests: report the resolved userData dir (identity parity) and the
+    // currently-watched folder (proves --project seeding wrote it, or that nothing wrote without it).
+    smokeLog({ ok: true, check: 'udpath', name: app.getName(), userData: app.getPath('userData'), folder: readCfg().folder || null });
+    quitApp();
+    return;
+  }
+  if (mode === 'telemetry') {
+    // Verify the opt-in pipe resolves a collector when consent is on (built-in default unless the user
+    // set their own url/key). Reads back what telemetryBlock() would attach to a feedback event.
+    const b = telemetryBlock();
+    smokeLog({ ok: true, check: 'telemetry', consent: !!readCfg().telemetryConsent, hasBlock: !!b, usesDefault: !!(b && b.url === DEFAULT_TELEMETRY_URL) });
+    quitApp();
+    return;
+  }
+  if (mode === 'render') {
+    // Headless check that the renderer loaded AND reflects the right onboarding state: read the pill's
+    // class list + primary-button label back from the DOM after the hydrate IPC settles.
+    const probe = () => setTimeout(() => {
+      win.webContents.executeJavaScript("({cls:document.getElementById('w').className,label:(document.querySelector('.save .label').textContent||'').trim()})")
+        .then((r) => { smokeLog({ ok: true, check: 'render', cls: r.cls, label: r.label }); quitApp(); })
+        .catch((e) => { smokeLog({ ok: false, check: 'render', err: String((e && e.message) || e) }); quitApp(); });
+    }, 250);
+    if (win && win.webContents.isLoading()) win.webContents.once('did-finish-load', probe); else probe();
+    return;
+  }
   if (mode === 'crash') {
     const start = Date.now();
     const iv = setInterval(() => {
@@ -145,7 +180,20 @@ function runSmoke(mode) {
   quitApp();
 }
 
+// `npx wrap-it-up` (bin/wrap-it-up.js) passes `--project <cwd>` so the terminal's current folder is
+// watched with zero clicks. Seed ONLY when the flag is explicitly present: the installed/login launch
+// never passes it, so its arbitrary launch cwd can never overwrite the user's chosen folder.
+function seedProjectFromArgv(argv) {
+  try {
+    const i = argv.indexOf('--project');
+    if (i < 0 || !argv[i + 1]) return;
+    const dir = path.resolve(argv[i + 1]);
+    if (fs.existsSync(dir)) setTarget(dir);
+  } catch { /* ignore */ }
+}
+
 app.whenReady().then(() => {
+  seedProjectFromArgv(process.argv);
   createWindow();
   createTray();
   installCrashRecovery();
@@ -336,7 +384,7 @@ function firstRunInit() {
   if (!cfg.aiNudgeShown && aiStatus() === 'off') {
     writeCfg({ aiNudgeShown: true });
     if (process.platform === 'win32' && tray) {
-      try { tray.displayBalloon({ title: 'Wrap It Up', content: 'Tip: add a Claude API key (right-click the tray) for AI wraps — it also works local-only.' }); } catch { /* ignore */ }
+      try { tray.displayBalloon({ title: 'Wrap It Up', content: 'Wraps work offline as-is. For AI-polished summaries, right-click the tray → add a Claude API key.' }); } catch { /* ignore */ }
     }
   }
 }
@@ -461,12 +509,18 @@ function setTelemetryConsent(on) {
   if (on && !readCfg().telemetryClientId) patch.telemetryClientId = require('crypto').randomUUID();
   writeCfg(patch);
 }
-// The block attached to a feedback event ONLY when consent is on AND a collector is configured.
-// Its presence in the piped event is what tells the engine the developer consented.
+// Built-in collector so the opt-in toggle works for EVERY user (not just a dev who hand-edits config).
+// The publishable key is RLS-restricted to INSERT-only — verified: anon SELECT returns [] — so it is
+// safe to ship. A user's own telemetryUrl/AnonKey in config still overrides it. The block's presence in
+// the piped event is what tells the engine consent is on; consent remains the hard gate.
+const DEFAULT_TELEMETRY_URL = 'https://aortqljmvycualvdzttr.supabase.co';
+const DEFAULT_TELEMETRY_ANON_KEY = 'sb_publishable_KFQHWBQM-XXbhaB0v1wfZw_aaQvOD9R';
 function telemetryBlock() {
   const c = readCfg();
-  if (!c.telemetryConsent || !c.telemetryUrl || !c.telemetryAnonKey) return null;
-  return { url: c.telemetryUrl, anonKey: c.telemetryAnonKey, clientId: c.telemetryClientId || '' };
+  if (!c.telemetryConsent) return null;                                    // no consent → never send
+  let clientId = c.telemetryClientId;
+  if (!clientId) { clientId = require('crypto').randomUUID(); writeCfg({ telemetryClientId: clientId }); } // RLS needs client_id ≥ 1
+  return { url: c.telemetryUrl || DEFAULT_TELEMETRY_URL, anonKey: c.telemetryAnonKey || DEFAULT_TELEMETRY_ANON_KEY, clientId };
 }
 ipcMain.on('show-menu', () => popupWidgetMenu());            // from the no-drag buttons (renderer)
 
@@ -508,11 +562,11 @@ const hasConsent = () => readCfg().sessionConsent === true;
 async function askConsent() {
   const r = await dialog.showMessageBox(win, {
     type: 'question',
-    buttons: ['Allow', 'Not now'],
+    buttons: ['Use my session', 'Git only'],
     defaultId: 0,
     cancelId: 1,
     title: 'Wrap It Up — read this session?',
-    message: 'Read your Claude Code session for a richer wrap?',
+    message: 'Use your Claude Code session for a truer wrap?',
     detail:
       'To tell you what actually worked and broke, Wrap It Up reads this project’s ' +
       'Claude Code session file (the commands it ran and the files it changed). It is a ' +
@@ -556,6 +610,8 @@ function runFeedback(folder, event) {
   p.stdin.write(JSON.stringify(payload));
   p.stdin.end();
 }
+
+ipcMain.on('select-folder', () => changeFolder());   // the no-folder pill's button → reuse the picker
 
 ipcMain.on('wrap', async () => {
   let folder = targetFolder();

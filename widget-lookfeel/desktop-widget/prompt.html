@@ -101,7 +101,7 @@
 
     // main sends the current state once the page is ready.
     ipcRenderer.on('key-data', (_e, d) => {
-      const label = d && d.status === 'cli' ? 'AI: Claude CLI (preferred)'
+      const label = d && d.status === 'cli' ? 'AI: Claude CLI'
         : d && d.status === 'key' ? 'AI: using your API key'
         : 'AI: off — add a key for AI wraps';
       statusEl.textContent = label;

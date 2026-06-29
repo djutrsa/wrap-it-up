@@ -110,6 +110,10 @@
   .wiu .ic{ position:absolute; inset:0; display:grid; place-items:center; transition:opacity .2s ease, transform .2s ease; }
   .wiu .ic svg{ width:var(--icon); height:var(--icon); }
   .wiu .ic-check{ opacity:0; }
+  /* No project chosen yet: the single button becomes "Choose folder" (folder icon swaps in). */
+  .wiu .ic-folder{ opacity:0; }
+  .wiu.no-folder .save .ic-save{ opacity:0; }
+  .wiu.no-folder .save .ic-folder{ opacity:1; }
   .wiu .label{ font-size:var(--lab); font-weight:650; letter-spacing:.3px; text-transform:uppercase; white-space:nowrap;
     line-height:1.05; height:var(--labh); text-align:center; color:#fff; opacity:.96; text-shadow:0 1px 3px var(--label-shadow);
     display:flex; flex-direction:column; align-items:center; justify-content:center; }
@@ -165,6 +169,7 @@
         <span class="disc"><span class="icwrap">
           <span class="ic ic-save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8"/><path d="M16.5 8a2.5 2.5 0 0 0 0-5C13 3 12 8 12 8"/></svg></span>
           <span class="ic ic-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+          <span class="ic ic-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6l1.1 1.1a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v6.7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 10.8v4.6"/><path d="M9.7 13.1h4.6"/></svg></span>
         </span></span>
         <span class="label">Wrap it up</span>
       </button>
@@ -184,6 +189,8 @@
     const loadB = document.getElementById('loadBtn');
     const loadLabel = loadB.querySelector('.label');
     const loadLabelHTML = loadLabel.innerHTML;
+    const saveLabel = saveB.querySelector('.label');
+    const saveLabelHTML = saveLabel.innerHTML;
 
     function setSave(on, animate){
       const was = root.classList.contains('has-save');
@@ -193,9 +200,17 @@
       if(!on) root.classList.remove('unlocking');
     }
     function pulse(cls){ root.classList.remove(cls); void root.offsetWidth; root.classList.add(cls); setTimeout(()=>root.classList.remove(cls), 700); }
+    // No project chosen → the single primary button becomes "Choose folder" and opens the picker.
+    function setNoFolder(on){
+      root.classList.toggle('no-folder', on);
+      saveB.title = on ? 'Choose a working folder' : 'Wrap it up';
+      saveB.setAttribute('aria-label', on ? 'Choose a working folder' : 'Wrap it up');
+      saveLabel.innerHTML = on ? 'Choose<br>folder' : saveLabelHTML;
+    }
 
     saveB.addEventListener('click', (e)=>{
       e.stopPropagation();
+      if(root.classList.contains('no-folder')){ ipcRenderer.send('select-folder'); return; }
       if(root.classList.contains('saving')) return;
       root.classList.remove('done'); root.classList.add('saving');
       ipcRenderer.send('wrap');                       // the engine actually wraps the project
@@ -242,6 +257,7 @@
     ipcRenderer.on('hydrate', (_e, res)=>{
       if(!res) return;
       if(res.theme) root.dataset.theme = res.theme;
+      setNoFolder(!!res.noFolder);
       const has = !!res.hasSave;
       if(has === root.classList.contains('has-save')) return; // no change
       root.classList.add('no-anim');             // restored/switched state: no slide-in/glow

@@ -106,6 +106,8 @@
   .chip:hover{ background:var(--chip-hover); transform:translateY(-1px); }
   .chip:active{ transform:scale(.96); }
   .chips .skip{ background:transparent; color:var(--chip-skip); text-decoration:underline; }
+  .chips-q{ flex-basis:100%; font-size:10.5px; font-weight:600; color:rgba(255,247,236,.62); margin:1px 0 1px; }
+  .chips-alt{ flex-basis:100%; display:flex; gap:6px; margin-top:5px; padding-top:6px; border-top:1px solid rgba(255,244,228,.14); }
 
   /* Clock-2 retrospective — faint, one line, references the PREVIOUS wrap */
   .reentry{ display:none; margin-top:11px; padding-top:9px; border-top:1px solid rgba(255,244,228,.16);
@@ -140,26 +142,29 @@
     <div class="copied" id="copied" hidden>next prompt <b>copied ✓</b></div>
 
     <div id="ask">
-      <div class="q">did <em>this note</em> land?</div>
+      <div class="q">Is <em>this note</em> useful?</div>
       <div class="pills">
         <button class="pill" data-v="didnt_help">didn't help</button>
         <button class="pill" data-v="oriented">got me oriented</button>
         <button class="pill" data-v="right_back_in">right back in</button>
       </div>
       <div class="chips" id="chips">
-        <button class="chip" data-c="stale">stale</button>
-        <button class="chip" data-c="wrong_files">wrong files</button>
-        <button class="chip" data-c="couldnt_tell">couldn't tell</button>
-        <button class="chip" data-c="note_fine_i_bounced">note was fine, I just bounced</button>
-        <button class="chip skip" data-c="">skip</button>
+        <div class="chips-q">What was off? — tap one and I'll rewrite it</div>
+        <button class="chip" data-c="stale" title="It described something already changed — I'll redo it from the current state.">out of date</button>
+        <button class="chip" data-c="wrong_files" title="It wrapped the wrong work — files or a session you weren't actually on. I'll redo it on the right one.">wrong work</button>
+        <button class="chip" data-c="couldnt_tell" title="Too vague to follow — I'll rewrite it clearer.">too vague</button>
+        <div class="chips-alt">
+          <button class="chip" data-c="note_fine_i_bounced">the note was fine — I just bounced</button>
+          <button class="chip skip" data-c="">skip</button>
+        </div>
       </div>
     </div>
     <div class="thanks" id="thanks">thanks — logged.</div>
 
     <div class="reentry" id="reentry">
-      <span class="rq">last note<span id="prevTitle"></span> — did it land?</span>
+      <span class="rq">Did the <b>last</b> note<span id="prevTitle"></span> get you going again?</span>
       <div class="rpills">
-        <button class="rpill" data-r="didnt_help">didn't help</button>
+        <button class="rpill" data-r="didnt_help">not really</button>
         <button class="rpill" data-r="eventually">eventually</button>
         <button class="rpill" data-r="yes">yes</button>
       </div>
@@ -285,7 +290,7 @@
     let regenSafety = null;
     function showRegenerating(){
       askEl.style.display = 'none';
-      thanksEl.textContent = 'regenerating…';
+      thanksEl.textContent = 'rewriting the note…';
       thanksEl.classList.add('show');
       requestAnimationFrame(reportSize);
       clearTimeout(regenSafety);
@@ -298,7 +303,7 @@
       if (res && res.ok) {
         if (res.nextMove) moveEl.textContent = res.nextMove;
         copiedEl.hidden = false;
-        thanksEl.textContent = 'updated ✓';
+        thanksEl.textContent = 'note rewritten ✓';
       } else {
         thanksEl.textContent = 'thanks — logged.';
       }

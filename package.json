@@ -78,6 +78,7 @@
     "watch": "tsc -watch -p ./",
     "selftest": "node ./out/selftest.js",
     "test": "tsc -p ./ && node ./out/kiro.test.js && node ./out/kiroIde.test.js && node ./out/kiroModel.test.js && node ./out/staleness.test.js",
+    "npx:smoke": "node widget-lookfeel/desktop-widget/npx-smoke.js",
     "start": "electron widget-lookfeel/desktop-widget/main.js",
     "build": "tsc -p .",
     "dev": "concurrently -k -n tsc,app \"tsc -w -p .\" \"electron widget-lookfeel/desktop-widget/main.js\"",
