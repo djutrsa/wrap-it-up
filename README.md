@@ -8,7 +8,7 @@ Wrap It Up fixes that. One click writes a short, trustworthy note of **where you
 
 > Auto-save and git keep your *files*. They don't keep the *story* — what you changed, what's working, what's broken, and what to do next. **Wrap It Up keeps the story.**
 
-*Early and experimental. Runs on your machine. No tracking, ever.*
+*Early and experimental. Runs on your machine. No tracking by default.*
 
 ---
 
@@ -43,8 +43,8 @@ It only tells you things it actually saw. When it isn't sure, it *says so* — a
 
 - Everything stays **on your machine**.
 - It scrubs obvious secrets — keys, tokens, passwords — before writing anything down (best-effort, not a guarantee).
-- No analytics, no telemetry, nothing phoned home.
-- The only thing that ever leaves your computer is one optional, consented request to an AI to polish the wording — and you can skip it and keep the plain version.
+- **Telemetry is off by default.** There's an optional "Share anonymous usage data" toggle; turn it on and it sends only anonymous metadata — your 👍/👎 rating and version numbers, **never your code, prompts, or the wrap text**.
+- The only things that ever leave your computer: the optional, consented AI request that polishes the wording (skippable — the plain version always works), and, **only if you opt in**, the anonymous usage metadata above. Nothing else.
 
 ## How it works — and why
 
@@ -54,7 +54,15 @@ A few deliberate choices under the hood:
 - **The button waits; it never guesses you're back.** Wrapping up sets a quiet marker, and "Where was I?" lights up beside it — there's no fragile "are they back yet?" detection to get wrong. The marker clears only when *you* act (pick it up, wrap again, or dismiss), never on a stray keystroke — because mis-guessing "was that a real edit?" is exactly how a safety net vanishes at the worst moment. ("Where was I?" also stays hidden until there's actually something to return to.)
 - **The truth comes from artifacts, not vibes.** Status and "what works / what broke" are grounded in real captured signals — a passed or failed run, an error that appeared or cleared, a diff hunk — so the note can't claim something the work doesn't back up.
 
-## Try it (from source)
+## Try it in 10 seconds
+
+```bash
+npx wrap-it-up
+```
+
+Run it from any project folder and the real widget appears, already watching that folder — no install, on macOS / Windows / Linux (the first run downloads the runtime). Ready for the always-on version? Install the desktop app below.
+
+## Run it from source
 
 ```bash
 npm install

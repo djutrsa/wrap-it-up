@@ -19,3 +19,8 @@ brag-output/
 # OS / editor cruft
 .DS_Store
 Thumbs.db
+
+# Internal docs / design exploration — keep local, never publish
+CLAUDE.md
+widget-lookfeel/*.html
+widget-lookfeel/widget-design-log.md
